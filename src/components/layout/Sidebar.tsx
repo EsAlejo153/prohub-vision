@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, Link } from "react-router-dom";
 import { BarChart3, TrendingUp, Scale, Upload, Settings, LogOut } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 
@@ -43,14 +43,18 @@ export default function Sidebar() {
       </nav>
 
       <div className="border-t border-border p-3">
-        <div className="flex items-center gap-2">
+        <Link
+          to="/profile"
+          className="flex items-center gap-2 rounded-md p-1 hover:bg-secondary"
+        >
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
             {initial}
           </div>
           <div className="min-w-0 flex-1">
             <div className="truncate text-[11px] font-medium text-foreground">{user?.email}</div>
+            <div className="text-[10px] text-muted-foreground">Ver perfil</div>
           </div>
-        </div>
+        </Link>
         <button
           onClick={signOut}
           className="mt-2 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-muted-foreground hover:bg-secondary hover:text-foreground"
