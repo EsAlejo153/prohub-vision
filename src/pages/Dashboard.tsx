@@ -56,7 +56,7 @@ export default function Dashboard() {
         {kpis.map((k) => <KpiCard key={k.label} {...k} />)}
       </div>
 
-      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-100" style={{ gridTemplateColumns: "45fr 30fr 25fr" }}>
+      <div className="mt-6 grid grid-cols-1 gap-4 lg:[grid-template-columns:45fr_30fr_25fr]">
         <Panel title="Tendencia: Ingresos · Margen Operacional">
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
