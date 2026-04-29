@@ -12,6 +12,7 @@ import Balance from "./pages/Balance.tsx";
 import Cargue from "./pages/Cargue.tsx";
 import Configuracion from "./pages/Configuracion.tsx";
 import { AuthProvider } from "./context/AuthContext";
+import { FiltrosProvider } from "./context/FiltrosContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 const queryClient = new QueryClient();
@@ -23,6 +24,7 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <AuthProvider>
+          <FiltrosProvider>
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/login" element={<Login />} />
@@ -34,6 +36,7 @@ const App = () => (
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </FiltrosProvider>
         </AuthProvider>
       </BrowserRouter>
     </TooltipProvider>
