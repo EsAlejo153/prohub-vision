@@ -45,8 +45,23 @@ export interface ParsedRow {
   usuario?: string;
   // Validation
   errors: string[];
+  fieldErrors: Partial<Record<ErrorField, string>>;
+  rowEmpty?: boolean;
+  excelRow?: number;
   valid: boolean;
 }
+
+export type ErrorField =
+  | "Compañia"
+  | "Cuenta"
+  | "Nombre"
+  | "Fecha"
+  | "Débito"
+  | "Crédito"
+  | "Centro Costos"
+  | "Comprobante"
+  | "Concepto"
+  | "__row__";
 
 function parseExcelDate(v: unknown): Date | null {
   if (v == null || v === "") return null;
