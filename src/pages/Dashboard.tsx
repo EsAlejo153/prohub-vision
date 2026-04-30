@@ -780,26 +780,26 @@ function BalanceRow({
   badgeColor: string;
 }) {
   return (
-    <div className="flex items-center justify-between py-1.5">
-      <span style={{ fontSize: 11, color: C.textMuted }}>{label}</span>
+    <div className="flex items-center justify-between py-2">
+      <span style={{ fontSize: 12, color: C.textMuted, fontWeight: 500 }}>{label}</span>
       <div className="flex items-center gap-2">
         <span
           style={{
-            fontSize: 13,
+            fontSize: 18,
             color: valueColor ?? C.textPrimary,
             fontVariantNumeric: "tabular-nums",
-            fontWeight: 500,
+            fontWeight: 600,
           }}
         >
           {value}
         </span>
         <span
           style={{
-            fontSize: 9,
+            fontSize: 10,
             color: badgeColor,
             background: `${badgeColor}1f`,
             border: `0.5px solid ${badgeColor}55`,
-            padding: "1px 6px",
+            padding: "2px 7px",
             borderRadius: 999,
             fontVariantNumeric: "tabular-nums",
           }}
