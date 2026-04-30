@@ -779,15 +779,15 @@ function SolvRow({
 function DistRow({ label, pct, color }: { label: string; pct: number; color: string }) {
   const safe = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
   return (
-    <div style={{ marginBottom: 8 }}>
-      <div className="flex items-center justify-between" style={{ fontSize: 10, color: C.textMuted }}>
+    <div style={{ marginBottom: 10 }}>
+      <div className="flex items-center justify-between" style={{ fontSize: 11, color: C.textMuted }}>
         <span>{label}</span>
         <span style={{ color: C.textPrimary, fontVariantNumeric: "tabular-nums" }}>{safe.toFixed(1)}%</span>
       </div>
       <div
         style={{
-          marginTop: 3,
-          height: 4,
+          marginTop: 4,
+          height: 6,
           background: C.cardBorder,
           borderRadius: 2,
           overflow: "hidden",
