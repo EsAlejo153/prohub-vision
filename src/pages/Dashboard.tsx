@@ -106,13 +106,13 @@ function Sparkline({
       width={w}
       height={h}
       viewBox={`0 0 ${w} ${h}`}
-      style={{ position: "absolute", bottom: 0, right: 0, opacity: 0.55, pointerEvents: "none" }}
+      style={{ position: "absolute", bottom: 0, right: 0, opacity: 0.9, pointerEvents: "none" }}
       aria-hidden
     >
       <defs>
         <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity={0.45} />
-          <stop offset="100%" stopColor={color} stopOpacity={0} />
+          <stop offset="0%" stopColor={color} stopOpacity={0.7} />
+          <stop offset="100%" stopColor={color} stopOpacity={0.05} />
         </linearGradient>
       </defs>
       <path d={areaPath} fill={`url(#${gradId})`} />
@@ -360,7 +360,9 @@ export default function Dashboard() {
           padding: 16,
           display: "flex",
           flexDirection: "column",
-          gap: 8,
+          gap: 12,
+          height: "calc(100vh - 56px)",
+          overflowY: "auto",
         }}
       >
         {isLoading ? (
@@ -374,7 +376,7 @@ export default function Dashboard() {
         ) : (
           <>
             {/* ROW 1 — Hero KPIs */}
-            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", flex: "0 0 auto" }}>
               <HeroCard
                 label="Ingresos operativos"
                 value={formatM(totals.ingresos)}
@@ -411,7 +413,7 @@ export default function Dashboard() {
             </div>
 
             {/* ROW 2 — Ratios */}
-            <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
+            <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))", flex: "0 0 auto" }}>
               <RatioCard
                 label="Margen bruto %"
                 value={formatPctV(margenBruto)}
@@ -449,7 +451,7 @@ export default function Dashboard() {
             </div>
 
             {/* ROW 3 — Main chart + Balance */}
-            <div className="grid gap-3" style={{ gridTemplateColumns: "62fr 38fr" }}>
+            <div className="grid gap-3" style={{ gridTemplateColumns: "62fr 38fr", flex: "1 1 auto", minHeight: 0 }}>
               {/* Main area chart */}
               <div
                 style={{
@@ -457,6 +459,10 @@ export default function Dashboard() {
                   border: `0.5px solid ${C.cardBorder}`,
                   borderRadius: 8,
                   padding: 12,
+                  display: "flex",
+                  flexDirection: "column",
+                  height: "100%",
+                  minHeight: 0,
                 }}
               >
                 <div className="flex items-center justify-between mb-2">
@@ -474,7 +480,8 @@ export default function Dashboard() {
                     </span>
                   </div>
                 </div>
-                <ResponsiveContainer width="100%" height={160}>
+                <div style={{ flex: "1 1 auto", minHeight: 200 }}>
+                <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={chartData} margin={{ top: 6, right: 6, left: -8, bottom: 0 }}>
                     <defs>
                       <linearGradient id="gradIngresos" x1="0" y1="0" x2="0" y2="1">
@@ -533,16 +540,18 @@ export default function Dashboard() {
                     />
                   </ComposedChart>
                 </ResponsiveContainer>
+                </div>
               </div>
 
               {/* Balance stack */}
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2" style={{ minHeight: 0 }}>
                 <div
                   style={{
                     background: C.cardBg,
                     border: `0.5px solid ${C.cardBorder}`,
                     borderRadius: 8,
                     padding: 12,
+                    flex: "1 1 auto",
                   }}
                 >
                   <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Balance general</div>
@@ -572,6 +581,7 @@ export default function Dashboard() {
                     border: `0.5px solid ${C.cardBorder}`,
                     borderRadius: 8,
                     padding: 12,
+                    flex: "1 1 auto",
                   }}
                 >
                   <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Ratios de solvencia</div>
@@ -583,7 +593,7 @@ export default function Dashboard() {
             </div>
 
             {/* ROW 4 — Bottom panels */}
-            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", flex: "0 0 200px", marginBottom: 0 }}>
               {/* Mini area chart */}
               <div
                 style={{
@@ -591,10 +601,13 @@ export default function Dashboard() {
                   border: `0.5px solid ${C.cardBorder}`,
                   borderRadius: 8,
                   padding: 12,
+                  display: "flex",
+                  flexDirection: "column",
                 }}
               >
                 <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Ingresos por mes</div>
-                <ResponsiveContainer width="100%" height={70}>
+                <div style={{ flex: "1 1 auto", minHeight: 0 }}>
+                <ResponsiveContainer width="100%" height="100%" minHeight={160}>
                   <AreaChart data={chartData} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
                     <defs>
                       <linearGradient id="gradMini" x1="0" y1="0" x2="0" y2="1">
@@ -618,6 +631,7 @@ export default function Dashboard() {
                     />
                   </AreaChart>
                 </ResponsiveContainer>
+                </div>
               </div>
 
               {/* Distribución gastos */}
@@ -626,7 +640,7 @@ export default function Dashboard() {
                   background: C.cardBg,
                   border: `0.5px solid ${C.cardBorder}`,
                   borderRadius: 8,
-                  padding: 12,
+                  padding: 14,
                 }}
               >
                 <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Distribución de gastos</div>
@@ -657,9 +671,9 @@ export default function Dashboard() {
                         gridTemplateColumns: "1fr auto auto",
                         gap: 8,
                         alignItems: "center",
-                        padding: "3px 0",
+                        padding: "8px 0",
                         borderBottom: i < topAgg.length - 1 ? `0.5px solid #0d1525` : "none",
-                        fontSize: 10,
+                        fontSize: 11,
                       }}
                     >
                       <span
@@ -765,15 +779,15 @@ function SolvRow({
 function DistRow({ label, pct, color }: { label: string; pct: number; color: string }) {
   const safe = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
   return (
-    <div style={{ marginBottom: 8 }}>
-      <div className="flex items-center justify-between" style={{ fontSize: 10, color: C.textMuted }}>
+    <div style={{ marginBottom: 10 }}>
+      <div className="flex items-center justify-between" style={{ fontSize: 11, color: C.textMuted }}>
         <span>{label}</span>
         <span style={{ color: C.textPrimary, fontVariantNumeric: "tabular-nums" }}>{safe.toFixed(1)}%</span>
       </div>
       <div
         style={{
-          marginTop: 3,
-          height: 4,
+          marginTop: 4,
+          height: 6,
           background: C.cardBorder,
           borderRadius: 2,
           overflow: "hidden",
