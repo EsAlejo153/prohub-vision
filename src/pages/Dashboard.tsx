@@ -902,56 +902,60 @@ function GaugeCard({
   const angle = pct * 180 - 90;
   const isGood = invert ? safe >= threshold : safe <= threshold;
   const color = isGood ? colorOk : colorBad;
-  const r = 28;
-  const cx = 36;
-  const cy = 36;
+  const r = 32;
+  const cx = 40;
+  const cy = 42;
   const arcLen = Math.PI * r;
   return (
     <div
       style={{
         background: C.card2Bg,
         borderRadius: 8,
-        padding: "10px 8px",
+        padding: 14,
         textAlign: "center",
         border: `0.5px solid ${C.card2Border}`,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "space-between",
       }}
     >
-      <svg width="72" height="40" viewBox="0 0 72 40" style={{ display: "block", margin: "0 auto" }}>
+      <svg width="80" height="48" viewBox="0 0 80 48" style={{ display: "block", margin: "0 auto" }}>
         <path
           d={`M ${cx - r},${cy} A ${r},${r} 0 0,1 ${cx + r},${cy}`}
           fill="none"
           stroke="#1a2332"
-          strokeWidth={5}
+          strokeWidth={6}
           strokeLinecap="round"
         />
         <path
           d={`M ${cx - r},${cy} A ${r},${r} 0 0,1 ${cx + r},${cy}`}
           fill="none"
           stroke={color}
-          strokeWidth={5}
+          strokeWidth={6}
           strokeLinecap="round"
           strokeDasharray={`${pct * arcLen} ${arcLen}`}
         />
         <circle
           cx={cx + r * Math.cos((angle * Math.PI) / 180)}
           cy={cy - r * Math.sin((angle * Math.PI) / 180)}
-          r={3}
+          r={3.5}
           fill={color}
         />
       </svg>
       <div
         style={{
-          fontSize: 13,
-          fontWeight: 500,
+          fontSize: 16,
+          fontWeight: 600,
           color,
-          marginTop: -2,
+          marginTop: 2,
           fontVariantNumeric: "tabular-nums",
         }}
       >
         {safe.toFixed(1)}
         {unit}
       </div>
-      <div style={{ fontSize: 9, color: C.textDim, marginTop: 2 }}>{label}</div>
+      <div style={{ fontSize: 10, color: C.textDim, marginTop: 4 }}>{label}</div>
     </div>
   );
 }
