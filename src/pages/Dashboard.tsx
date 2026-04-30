@@ -842,7 +842,7 @@ function DistRow({ label, pct, color }: { label: string; pct: number; color: str
       <div
         style={{
           marginTop: 4,
-          height: 6,
+          height: 8,
           background: C.cardBorder,
           borderRadius: 2,
           overflow: "hidden",
@@ -920,7 +920,7 @@ function GaugeCard({
         justifyContent: "space-between",
       }}
     >
-      <svg width="80" height="48" viewBox="0 0 80 48" style={{ display: "block", margin: "0 auto" }}>
+      <svg width="90" height="52" viewBox="0 0 80 48" style={{ display: "block", margin: "0 auto" }}>
         <path
           d={`M ${cx - r},${cy} A ${r},${r} 0 0,1 ${cx + r},${cy}`}
           fill="none"
@@ -945,8 +945,8 @@ function GaugeCard({
       </svg>
       <div
         style={{
-          fontSize: 16,
-          fontWeight: 600,
+          fontSize: 18,
+          fontWeight: 700,
           color,
           marginTop: 2,
           fontVariantNumeric: "tabular-nums",
