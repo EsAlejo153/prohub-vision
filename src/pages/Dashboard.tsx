@@ -346,6 +346,16 @@ export default function Dashboard() {
   const roe = last?.roe_pct ?? 0;
   const endeudamiento = last?.endeudamiento_pct ?? 0;
   const autonomia = last?.autonomia_pct ?? 0;
+  const roa = last?.roa_pct ?? 0;
+
+  const clampedChartData = useMemo(
+    () =>
+      chartData.map((d) => ({
+        ...d,
+        margen_operacional_pct: Math.max(-100, Math.min(100, d.margen_operacional_pct)),
+      })),
+    [chartData]
+  );
 
   const prev = rows.length >= 2 ? rows[rows.length - 2] : null;
   const dPct = (curr: number, prv: number | undefined) =>
@@ -358,11 +368,11 @@ export default function Dashboard() {
           background: C.pageBg,
           margin: -24,
           padding: 16,
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
+          display: "grid",
+          gridTemplateRows: "auto auto auto 1fr",
+          gap: 8,
           height: "calc(100vh - 56px)",
-          overflowY: "auto",
+          overflow: "hidden",
         }}
       >
         {isLoading ? (
@@ -480,9 +490,9 @@ export default function Dashboard() {
                     </span>
                   </div>
                 </div>
-                <div style={{ flex: "1 1 auto", minHeight: 200 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={chartData} margin={{ top: 6, right: 6, left: -8, bottom: 0 }}>
+                <div style={{ height: 160 }}>
+                <ResponsiveContainer width="100%" height={160}>
+                  <ComposedChart data={clampedChartData} margin={{ top: 6, right: 6, left: -8, bottom: 0 }}>
                     <defs>
                       <linearGradient id="gradIngresos" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor={C.blue} stopOpacity={0.3} />
@@ -501,6 +511,7 @@ export default function Dashboard() {
                     <YAxis
                       yAxisId="right"
                       orientation="right"
+                      domain={[-100, 100]}
                       tick={{ fontSize: 9, fill: C.textDim }}
                       axisLine={false}
                       tickLine={false}
@@ -574,6 +585,7 @@ export default function Dashboard() {
                     badge={formatPctV(autonomia)}
                     badgeColor={autonomia < 0 ? C.negative : C.positive}
                   />
+                  <StructureBar activos={balance.activos} pasivos={balance.pasivos} patrimonio={balance.patrimonio} />
                 </div>
                 <div
                   style={{
@@ -585,9 +597,12 @@ export default function Dashboard() {
                   }}
                 >
                   <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Ratios de solvencia</div>
-                  <SolvRow label="Endeudamiento %" value={endeudamiento} good={(v) => v < 60} />
-                  <SolvRow label="Autonomía %" value={autonomia} good={(v) => v > 30} />
-                  <SolvRow label="ROE %" value={roe} good={(v) => v > 0} />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                    <GaugeCard label="Endeudamiento" value={endeudamiento} unit="%" min={0} max={200} threshold={100} colorOk={C.positive} colorBad={C.negative} />
+                    <GaugeCard label="Autonomía" value={autonomia} unit="%" min={-100} max={100} threshold={0} colorOk={C.positive} colorBad={C.negative} invert />
+                    <GaugeCard label="ROE" value={roe} unit="%" min={-20} max={20} threshold={0} colorOk={C.positive} colorBad={C.negative} invert />
+                    <GaugeCard label="ROA" value={roa} unit="%" min={-20} max={20} threshold={0} colorOk={C.positive} colorBad={C.negative} invert />
+                  </div>
                 </div>
               </div>
             </div>
@@ -795,6 +810,108 @@ function DistRow({ label, pct, color }: { label: string; pct: number; color: str
       >
         <div style={{ width: `${safe}%`, height: "100%", background: color, borderRadius: 2 }} />
       </div>
+    </div>
+  );
+}
+
+function StructureBar({ activos, pasivos, patrimonio }: { activos: number; pasivos: number; patrimonio: number }) {
+  const denom = Math.abs(activos) || Math.abs(pasivos) + Math.abs(patrimonio) || 1;
+  const pasivosPct = (Math.abs(pasivos) / denom) * 100;
+  const patrimonioPct = Math.max(0, (patrimonio / denom) * 100);
+  return (
+    <div style={{ marginTop: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 9, color: C.textDim }}>
+        <span>Estructura de financiación</span>
+        <span style={{ fontVariantNumeric: "tabular-nums" }}>{pasivosPct.toFixed(1)}% deuda</span>
+      </div>
+      <div style={{ height: 6, borderRadius: 3, background: "#1a2332", overflow: "hidden", display: "flex" }}>
+        <div style={{ width: `${Math.min(pasivosPct, 100)}%`, background: C.negative, transition: "width 0.5s" }} />
+        <div style={{ width: `${Math.min(patrimonioPct, 100)}%`, background: C.positive, transition: "width 0.5s" }} />
+      </div>
+      <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
+        <span style={{ fontSize: 9, color: C.negative }}>● Pasivos</span>
+        <span style={{ fontSize: 9, color: C.positive }}>● Patrimonio</span>
+      </div>
+    </div>
+  );
+}
+
+function GaugeCard({
+  label,
+  value,
+  unit,
+  min,
+  max,
+  threshold,
+  colorOk,
+  colorBad,
+  invert,
+}: {
+  label: string;
+  value: number;
+  unit: string;
+  min: number;
+  max: number;
+  threshold: number;
+  colorOk: string;
+  colorBad: string;
+  invert?: boolean;
+}) {
+  const safe = Number.isFinite(value) ? value : 0;
+  const pct = Math.min(Math.max((safe - min) / (max - min), 0), 1);
+  const angle = pct * 180 - 90;
+  const isGood = invert ? safe >= threshold : safe <= threshold;
+  const color = isGood ? colorOk : colorBad;
+  const r = 28;
+  const cx = 36;
+  const cy = 36;
+  const arcLen = Math.PI * r;
+  return (
+    <div
+      style={{
+        background: C.card2Bg,
+        borderRadius: 8,
+        padding: "10px 8px",
+        textAlign: "center",
+        border: `0.5px solid ${C.card2Border}`,
+      }}
+    >
+      <svg width="72" height="40" viewBox="0 0 72 40" style={{ display: "block", margin: "0 auto" }}>
+        <path
+          d={`M ${cx - r},${cy} A ${r},${r} 0 0,1 ${cx + r},${cy}`}
+          fill="none"
+          stroke="#1a2332"
+          strokeWidth={5}
+          strokeLinecap="round"
+        />
+        <path
+          d={`M ${cx - r},${cy} A ${r},${r} 0 0,1 ${cx + r},${cy}`}
+          fill="none"
+          stroke={color}
+          strokeWidth={5}
+          strokeLinecap="round"
+          strokeDasharray={`${pct * arcLen} ${arcLen}`}
+        />
+        <circle
+          cx={cx + r * Math.cos((angle * Math.PI) / 180)}
+          cy={cy - r * Math.sin((angle * Math.PI) / 180)}
+          r={3}
+          fill={color}
+        />
+      </svg>
+      <div
+        style={{
+          fontSize: 13,
+          fontWeight: 500,
+          color,
+          marginTop: -2,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {safe.toFixed(1)}
+        {unit}
+      </div>
+      <div style={{ fontSize: 9, color: C.textDim, marginTop: 2 }}>{label}</div>
     </div>
   );
 }
