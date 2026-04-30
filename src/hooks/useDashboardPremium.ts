@@ -45,10 +45,13 @@ export interface TopCuentaRow {
   compania: string;
   año_mes_num: number;
   ranking: number;
-  cuenta_codigo: string;
-  cuenta_nombre: string;
-  valor: number;
-  participacion_pct: number;
+  cuenta_key?: string;
+  cuenta_codigo?: string;
+  nombre_cuenta?: string;
+  cuenta_nombre?: string;
+  total?: number;
+  valor?: number;
+  participacion_pct?: number;
 }
 
 const MES_LABELS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
@@ -138,6 +141,34 @@ export function useTopCuentas(filtros: FiltroDashboard) {
       const { data, error } = await q;
       if (error) throw error;
       return (data ?? []) as TopCuentaRow[];
+    },
+  });
+}
+
+export interface BalanceTotals {
+  activos: number;
+  pasivos: number;
+  patrimonio: number;
+}
+
+export function useBalanceFallback(filtros: FiltroDashboard, enabled: boolean) {
+  return useQuery({
+    queryKey: ["balance_fallback", filtros],
+    enabled,
+    queryFn: async (): Promise<BalanceTotals> => {
+      let q = supabase.from("movimientos").select("clase_cod, saldo_final");
+      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+      const { data, error } = await q;
+      if (error) throw error;
+      const rows = (data ?? []) as { clase_cod: string | null; saldo_final: number | null }[];
+      const sumOf = (cls: string) =>
+        rows.filter((r) => String(r.clase_cod) === cls).reduce((s, r) => s + (Number(r.saldo_final) || 0), 0);
+      const activos = sumOf("1");
+      const pasivos = sumOf("2");
+      // Patrimonio puede venir como clase 3, o derivarse
+      const patrimonio3 = sumOf("3");
+      const patrimonio = patrimonio3 !== 0 ? patrimonio3 : activos - pasivos;
+      return { activos, pasivos, patrimonio };
     },
   });
 }

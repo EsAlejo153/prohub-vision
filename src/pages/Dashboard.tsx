@@ -1,24 +1,25 @@
 import AppLayout from "@/components/layout/AppLayout";
 import {
   ComposedChart,
-  Bar,
+  AreaChart,
+  Area,
   Line,
   XAxis,
   YAxis,
+  CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  BarChart,
-  Cell,
 } from "recharts";
 import { useFiltros } from "@/context/FiltrosContext";
 import {
   useKpisMesAMes,
   useDistribucionGastos,
   useTopCuentas,
+  useBalanceFallback,
   type KpiMesRow,
 } from "@/hooks/useDashboardPremium";
 import { useMemo } from "react";
-import { TrendingUp, AlertCircle } from "lucide-react";
+import { AlertCircle } from "lucide-react";
 
 // ===== Color tokens =====
 const C = {
@@ -59,27 +60,63 @@ const deltaArrow = (v: number | null | undefined) => (v == null ? "=" : v >= 0 ?
 const deltaColor = (v: number | null | undefined) =>
   v == null ? C.textDim : v >= 0 ? C.positive : C.negative;
 
-// ===== Sparkline =====
-function Sparkline({ values, color }: { values: number[]; color: string }) {
+// ===== Smooth sparkline (catmull-rom spline -> bezier) =====
+function smoothPath(points: Array<[number, number]>): string {
+  if (points.length === 0) return "";
+  if (points.length === 1) return `M ${points[0][0]} ${points[0][1]}`;
+  const d: string[] = [`M ${points[0][0]} ${points[0][1]}`];
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = points[i - 1] ?? points[i];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[i + 2] ?? p2;
+    const cp1x = p1[0] + (p2[0] - p0[0]) / 6;
+    const cp1y = p1[1] + (p2[1] - p0[1]) / 6;
+    const cp2x = p2[0] - (p3[0] - p1[0]) / 6;
+    const cp2y = p2[1] - (p3[1] - p1[1]) / 6;
+    d.push(`C ${cp1x.toFixed(2)} ${cp1y.toFixed(2)} ${cp2x.toFixed(2)} ${cp2y.toFixed(2)} ${p2[0]} ${p2[1]}`);
+  }
+  return d.join(" ");
+}
+
+function Sparkline({
+  values,
+  color,
+  gradId,
+}: {
+  values: number[];
+  color: string;
+  gradId: string;
+}) {
   if (values.length < 2) return null;
-  const w = 70;
-  const h = 32;
+  const w = 80;
+  const h = 36;
+  const pad = 2;
   const max = Math.max(...values.map((v) => Math.abs(v))) || 1;
-  const points = values
-    .map((v, i) => {
-      const x = (i / (values.length - 1)) * w;
-      const y = h - ((v / max) * h * 0.4 + h * 0.5);
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
+  const points: Array<[number, number]> = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * w;
+    // Map sign-aware: positive up, negative down, baseline center.
+    const y = h - ((v / max) * (h / 2 - pad) + h / 2);
+    return [x, y];
+  });
+  const linePath = smoothPath(points);
+  const areaPath = `${linePath} L ${w} ${h} L 0 ${h} Z`;
   return (
     <svg
       width={w}
       height={h}
-      style={{ position: "absolute", right: 10, bottom: 10, opacity: 0.5 }}
+      viewBox={`0 0 ${w} ${h}`}
+      style={{ position: "absolute", bottom: 0, right: 0, opacity: 0.55, pointerEvents: "none" }}
       aria-hidden
     >
-      <polyline fill="none" stroke={color} strokeWidth={1.5} points={points} />
+      <defs>
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity={0.45} />
+          <stop offset="100%" stopColor={color} stopOpacity={0} />
+        </linearGradient>
+      </defs>
+      <path d={areaPath} fill={`url(#${gradId})`} />
+      <path d={linePath} fill="none" stroke={color} strokeWidth={1.5} />
     </svg>
   );
 }
@@ -94,6 +131,8 @@ function HeroCard({
   sparkValues,
   highlight,
   valueColor,
+  sparkColor,
+  gradId,
 }: {
   label: string;
   value: string;
@@ -103,8 +142,9 @@ function HeroCard({
   sparkValues: number[];
   highlight?: boolean;
   valueColor?: string;
+  sparkColor: string;
+  gradId: string;
 }) {
-  const sparkColor = delta == null ? C.blue : delta >= 0 ? C.positive : C.negative;
   return (
     <div
       style={{
@@ -113,7 +153,6 @@ function HeroCard({
         border: `0.5px solid ${highlight ? C.blueDark : C.cardBorder}`,
         borderRadius: 8,
         padding: 12,
-        minHeight: 110,
         overflow: "hidden",
       }}
     >
@@ -139,17 +178,23 @@ function HeroCard({
       >
         {value}
       </div>
-      <div style={{ marginTop: 4, fontSize: 10, color: deltaColor(delta), fontVariantNumeric: "tabular-nums" }}>
+      <div
+        style={{
+          marginTop: 4,
+          fontSize: 10,
+          color: deltaColor(delta),
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
         {deltaArrow(delta)} {delta == null ? "—" : `${Math.abs(delta).toFixed(1)}%`}
         {prevLabel && <span style={{ color: C.textDim }}> vs {prevLabel}</span>}
       </div>
       <div style={{ marginTop: 6, fontSize: 9, color: "#4a5568" }}>{sub}</div>
-      <Sparkline values={sparkValues} color={sparkColor} />
+      <Sparkline values={sparkValues} color={sparkColor} gradId={gradId} />
     </div>
   );
 }
 
-// ===== Ratio Card =====
 function RatioCard({
   label,
   value,
@@ -194,11 +239,11 @@ function RatioCard({
   );
 }
 
-function Skel({ h = 110 }: { h?: number }) {
+function Skel() {
   return (
     <div
       className="animate-pulse"
-      style={{ background: C.cardBg, border: `0.5px solid ${C.cardBorder}`, borderRadius: 8, height: h }}
+      style={{ background: C.cardBg, border: `0.5px solid ${C.cardBorder}`, borderRadius: 8, height: 110 }}
     />
   );
 }
@@ -212,30 +257,6 @@ function EmptyMsg() {
   );
 }
 
-// ===== Custom Tooltip =====
-function ChartTooltip({ active, payload, label }: any) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div
-      style={{
-        background: "#111827",
-        border: `1px solid ${C.cardBorder}`,
-        borderRadius: 6,
-        padding: "6px 10px",
-        fontSize: 11,
-        color: C.textPrimary,
-      }}
-    >
-      <div style={{ color: C.textMuted, marginBottom: 4 }}>{label}</div>
-      {payload.map((p: any) => (
-        <div key={p.dataKey} style={{ color: p.color, fontVariantNumeric: "tabular-nums" }}>
-          {p.name}: {p.dataKey === "margen" ? `${Number(p.value).toFixed(1)}%` : formatM(Number(p.value) * 1_000_000)}
-        </div>
-      ))}
-    </div>
-  );
-}
-
 export default function Dashboard() {
   const filtros = useFiltros();
   const { data: rows = [], isLoading } = useKpisMesAMes(filtros);
@@ -245,7 +266,7 @@ export default function Dashboard() {
   const last = rows.length ? rows[rows.length - 1] : null;
   const prevLabel = rows.length >= 2 ? rows[rows.length - 2].mes_label : null;
 
-  // Aggregates
+  // Aggregates from kpis-mes-a-mes
   const totals = useMemo(() => {
     const sum = (k: keyof KpiMesRow) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
     return {
@@ -257,6 +278,15 @@ export default function Dashboard() {
       patrimonio: sum("patrimonio_total"),
     };
   }, [rows]);
+
+  // Balance fallback if zero
+  const balanceZero =
+    !isLoading && rows.length > 0 && totals.activos === 0 && totals.pasivos === 0 && totals.patrimonio === 0;
+  const { data: balFallback } = useBalanceFallback(filtros, balanceZero);
+
+  const balance = balanceZero && balFallback
+    ? balFallback
+    : { activos: totals.activos, pasivos: totals.pasivos, patrimonio: totals.patrimonio };
 
   const sparks = useMemo(
     () => ({
@@ -270,14 +300,14 @@ export default function Dashboard() {
   const chartData = useMemo(
     () =>
       rows.map((r) => ({
-        mes: r.mes_label,
-        ingresos: (Number(r.ingresos) || 0) / 1_000_000,
-        margen: Number(r.margen_operacional_pct) || 0,
+        mes_label: r.mes_label,
+        ingresos: Number(r.ingresos) || 0,
+        margen_operacional_pct: Number(r.margen_operacional_pct) || 0,
       })),
     [rows]
   );
 
-  // Distribución gastos (averaged across months)
+  // Distribución gastos averaged across filtered months
   const dist = useMemo(() => {
     if (!distRows.length) return { adm: 0, oper: 0, fin: 0, costos: 0 };
     const avg = (k: keyof typeof distRows[number]) =>
@@ -290,34 +320,26 @@ export default function Dashboard() {
     };
   }, [distRows]);
 
-  // Top cuentas (aggregate across months by cuenta_codigo)
+  // Top cuentas — group by cuenta_key (with fallbacks to cuenta_codigo)
   const topAgg = useMemo(() => {
-    const map = new Map<string, { nombre: string; valor: number; part: number; n: number }>();
-    for (const r of topRows) {
-      const key = r.cuenta_codigo;
+    const map = new Map<string, { nombre: string; total: number }>();
+    for (const r of topRows as any[]) {
+      const key = r.cuenta_key ?? r.cuenta_codigo ?? r.nombre_cuenta ?? r.cuenta_nombre ?? "—";
+      const nombre = r.nombre_cuenta ?? r.cuenta_nombre ?? String(key);
+      const valor = Number(r.total ?? r.valor ?? 0) || 0;
       const ex = map.get(key);
-      if (ex) {
-        ex.valor += Number(r.valor) || 0;
-        ex.part += Number(r.participacion_pct) || 0;
-        ex.n += 1;
-      } else {
-        map.set(key, {
-          nombre: r.cuenta_nombre,
-          valor: Number(r.valor) || 0,
-          part: Number(r.participacion_pct) || 0,
-          n: 1,
-        });
-      }
+      if (ex) ex.total += valor;
+      else map.set(key, { nombre, total: valor });
     }
-    return Array.from(map.values())
-      .map((r) => ({ ...r, part: r.part / r.n }))
-      .sort((a, b) => b.valor - a.valor)
-      .slice(0, 5);
+    const arr = Array.from(map.values()).sort((a, b) => b.total - a.total).slice(0, 5);
+    const grand = arr.reduce((s, r) => s + r.total, 0);
+    return arr.map((r) => ({ ...r, part: grand > 0 ? (r.total / grand) * 100 : 0 }));
   }, [topRows]);
 
   const valColor = (v: number) => (v < 0 ? C.negative : C.positive);
+  const sparkUtilOperColor = totals.utilOper < 0 ? C.negative : C.positive;
+  const sparkUtilNetaColor = totals.utilNeta < 0 ? C.negative : C.positive;
 
-  // Ratios from last month
   const margenBruto = last?.margen_bruto_pct ?? 0;
   const margenNeto = last?.margen_neto_pct ?? 0;
   const costoIngreso = last?.costo_ingreso_pct ?? 0;
@@ -331,7 +353,16 @@ export default function Dashboard() {
 
   return (
     <AppLayout title="Dashboard Financiero">
-      <div style={{ background: C.pageBg, margin: -24, padding: 16, minHeight: "calc(100vh - 56px)" }}>
+      <div
+        style={{
+          background: C.pageBg,
+          margin: -24,
+          padding: 16,
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+        }}
+      >
         {isLoading ? (
           <div className="grid grid-cols-3 gap-3">
             <Skel /><Skel /><Skel />
@@ -351,6 +382,8 @@ export default function Dashboard() {
                 prevLabel={prevLabel}
                 sub={`Acumulado ${rows[0]?.mes_label}–${last?.mes_label} ${filtros.año === "Todas" ? "" : filtros.año}`}
                 sparkValues={sparks.ingresos}
+                sparkColor={C.blue}
+                gradId="sp-ing"
                 highlight
               />
               <HeroCard
@@ -361,6 +394,8 @@ export default function Dashboard() {
                 prevLabel={prevLabel}
                 sub="Resultado operativo neto"
                 sparkValues={sparks.utilOper}
+                sparkColor={sparkUtilOperColor}
+                gradId="sp-uo"
               />
               <HeroCard
                 label="Utilidad neta"
@@ -370,14 +405,13 @@ export default function Dashboard() {
                 prevLabel={prevLabel}
                 sub="Después de gastos financieros"
                 sparkValues={sparks.utilNeta}
+                sparkColor={sparkUtilNetaColor}
+                gradId="sp-un"
               />
             </div>
 
             {/* ROW 2 — Ratios */}
-            <div
-              className="grid gap-2 mt-3"
-              style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}
-            >
+            <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
               <RatioCard
                 label="Margen bruto %"
                 value={formatPctV(margenBruto)}
@@ -415,11 +449,8 @@ export default function Dashboard() {
             </div>
 
             {/* ROW 3 — Main chart + Balance */}
-            <div
-              className="grid gap-3 mt-3"
-              style={{ gridTemplateColumns: "62fr 38fr" }}
-            >
-              {/* Main chart */}
+            <div className="grid gap-3" style={{ gridTemplateColumns: "62fr 38fr" }}>
+              {/* Main area chart */}
               <div
                 style={{
                   background: C.cardBg,
@@ -434,75 +465,74 @@ export default function Dashboard() {
                   </div>
                   <div className="flex items-center gap-3" style={{ fontSize: 10, color: C.textMuted }}>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: 2, background: C.blueDark }} />
+                      <span style={{ width: 8, height: 8, borderRadius: 2, background: C.blue }} />
                       Ingresos
                     </span>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                      <span
-                        style={{
-                          width: 12,
-                          height: 0,
-                          borderTop: `1.5px dashed ${C.positive}`,
-                        }}
-                      />
+                      <span style={{ width: 12, height: 0, borderTop: `1.5px dashed ${C.positive}` }} />
                       Margen %
                     </span>
                   </div>
                 </div>
-                <div style={{ height: 200 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor={C.blue} stopOpacity={0.95} />
-                          <stop offset="100%" stopColor={C.blueDark} stopOpacity={0.7} />
-                        </linearGradient>
-                      </defs>
-                      <XAxis
-                        dataKey="mes"
-                        stroke={C.textDim}
-                        fontSize={10}
-                        tickLine={false}
-                        axisLine={{ stroke: C.cardBorder }}
-                      />
-                      <YAxis
-                        yAxisId="left"
-                        stroke={C.textDim}
-                        fontSize={10}
-                        tickLine={false}
-                        axisLine={false}
-                        tickFormatter={(v: number) => `${v.toFixed(0)}M`}
-                      />
-                      <YAxis
-                        yAxisId="right"
-                        orientation="right"
-                        stroke={C.textDim}
-                        fontSize={10}
-                        tickLine={false}
-                        axisLine={false}
-                        tickFormatter={(v: number) => `${v.toFixed(0)}%`}
-                      />
-                      <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(59,130,246,0.08)" }} />
-                      <Bar
-                        yAxisId="left"
-                        dataKey="ingresos"
-                        name="Ingresos"
-                        fill="url(#barGrad)"
-                        radius={[2, 2, 0, 0]}
-                      />
-                      <Line
-                        yAxisId="right"
-                        type="monotone"
-                        dataKey="margen"
-                        name="Margen %"
-                        stroke={C.positive}
-                        strokeWidth={1.5}
-                        strokeDasharray="4 3"
-                        dot={false}
-                      />
-                    </ComposedChart>
-                  </ResponsiveContainer>
-                </div>
+                <ResponsiveContainer width="100%" height={160}>
+                  <ComposedChart data={chartData} margin={{ top: 6, right: 6, left: -8, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="gradIngresos" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={C.blue} stopOpacity={0.3} />
+                        <stop offset="95%" stopColor={C.blue} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke={C.card2Border} vertical={false} />
+                    <XAxis dataKey="mes_label" tick={{ fontSize: 9, fill: C.textDim }} axisLine={false} tickLine={false} />
+                    <YAxis
+                      yAxisId="left"
+                      tick={{ fontSize: 9, fill: C.textDim }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(v: number) => `$${(v / 1_000_000).toFixed(0)}M`}
+                    />
+                    <YAxis
+                      yAxisId="right"
+                      orientation="right"
+                      tick={{ fontSize: 9, fill: C.textDim }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(v: number) => `${v}%`}
+                    />
+                    <Tooltip
+                      contentStyle={{
+                        background: "#111827",
+                        border: `1px solid ${C.cardBorder}`,
+                        borderRadius: 6,
+                        fontSize: 11,
+                      }}
+                      labelStyle={{ color: C.textPrimary }}
+                      itemStyle={{ color: C.textMuted }}
+                      formatter={(value: number, name: string) => {
+                        if (name === "margen_operacional_pct") return [`${Number(value).toFixed(1)}%`, "Margen %"];
+                        return [formatM(Number(value)), "Ingresos"];
+                      }}
+                    />
+                    <Area
+                      yAxisId="left"
+                      type="monotone"
+                      dataKey="ingresos"
+                      stroke={C.blue}
+                      strokeWidth={2}
+                      fill="url(#gradIngresos)"
+                      dot={false}
+                    />
+                    <Line
+                      yAxisId="right"
+                      type="monotone"
+                      dataKey="margen_operacional_pct"
+                      stroke={C.positive}
+                      strokeWidth={1.5}
+                      strokeDasharray="4 3"
+                      dot={false}
+                    />
+                  </ComposedChart>
+                </ResponsiveContainer>
               </div>
 
               {/* Balance stack */}
@@ -518,20 +548,20 @@ export default function Dashboard() {
                   <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Balance general</div>
                   <BalanceRow
                     label="Activos"
-                    value={formatM(totals.activos)}
+                    value={formatM(balance.activos)}
                     badge="RC 0,8"
                     badgeColor={C.warning}
                   />
                   <BalanceRow
                     label="Pasivos"
-                    value={formatM(totals.pasivos)}
+                    value={formatM(balance.pasivos)}
                     badge={formatPctV(endeudamiento)}
                     badgeColor={C.negative}
                   />
                   <BalanceRow
                     label="Patrimonio"
-                    value={formatM(totals.patrimonio)}
-                    valueColor={totals.patrimonio < 0 ? C.negative : C.textPrimary}
+                    value={formatM(balance.patrimonio)}
+                    valueColor={balance.patrimonio < 0 ? C.negative : C.textPrimary}
                     badge={formatPctV(autonomia)}
                     badgeColor={autonomia < 0 ? C.negative : C.positive}
                   />
@@ -553,8 +583,8 @@ export default function Dashboard() {
             </div>
 
             {/* ROW 4 — Bottom panels */}
-            <div className="grid gap-3 mt-3" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
-              {/* Panel 1 — Bar mini */}
+            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+              {/* Mini area chart */}
               <div
                 style={{
                   background: C.cardBg,
@@ -564,27 +594,33 @@ export default function Dashboard() {
                 }}
               >
                 <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Ingresos por mes</div>
-                <div style={{ height: 90 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="barMini" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor={C.blue} />
-                          <stop offset="100%" stopColor={C.blueDark} />
-                        </linearGradient>
-                      </defs>
-                      <XAxis dataKey="mes" stroke={C.textDim} fontSize={9} tickLine={false} axisLine={false} />
-                      <Bar dataKey="ingresos" radius={[2, 2, 0, 0]}>
-                        {chartData.map((_, i) => (
-                          <Cell key={i} fill="url(#barMini)" />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                <ResponsiveContainer width="100%" height={70}>
+                  <AreaChart data={chartData} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="gradMini" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor={C.blue} stopOpacity={0.4} />
+                        <stop offset="95%" stopColor={C.blue} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <Area
+                      type="monotone"
+                      dataKey="ingresos"
+                      stroke={C.blue}
+                      strokeWidth={2}
+                      fill="url(#gradMini)"
+                      dot={false}
+                    />
+                    <XAxis
+                      dataKey="mes_label"
+                      tick={{ fontSize: 8, fill: "#4a5568" }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
 
-              {/* Panel 2 — Distribución gastos */}
+              {/* Distribución gastos */}
               <div
                 style={{
                   background: C.cardBg,
@@ -600,7 +636,7 @@ export default function Dashboard() {
                 <DistRow label="Costos de venta" pct={dist.costos} color={C.warning} />
               </div>
 
-              {/* Panel 3 — Top cuentas */}
+              {/* Top cuentas */}
               <div
                 style={{
                   background: C.cardBg,
@@ -626,13 +662,27 @@ export default function Dashboard() {
                         fontSize: 10,
                       }}
                     >
-                      <span style={{ color: C.textMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span
+                        style={{
+                          color: C.textMuted,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
                         {r.nombre}
                       </span>
                       <span style={{ color: C.textPrimary, fontVariantNumeric: "tabular-nums" }}>
-                        {formatM(r.valor)}
+                        {formatM(r.total)}
                       </span>
-                      <span style={{ color: C.textDim, fontVariantNumeric: "tabular-nums", minWidth: 36, textAlign: "right" }}>
+                      <span
+                        style={{
+                          color: C.textDim,
+                          fontVariantNumeric: "tabular-nums",
+                          minWidth: 36,
+                          textAlign: "right",
+                        }}
+                      >
                         {r.part.toFixed(1)}%
                       </span>
                     </div>
@@ -664,7 +714,14 @@ function BalanceRow({
     <div className="flex items-center justify-between py-1.5">
       <span style={{ fontSize: 11, color: C.textMuted }}>{label}</span>
       <div className="flex items-center gap-2">
-        <span style={{ fontSize: 13, color: valueColor ?? C.textPrimary, fontVariantNumeric: "tabular-nums", fontWeight: 500 }}>
+        <span
+          style={{
+            fontSize: 13,
+            color: valueColor ?? C.textPrimary,
+            fontVariantNumeric: "tabular-nums",
+            fontWeight: 500,
+          }}
+        >
           {value}
         </span>
         <span
@@ -708,7 +765,7 @@ function SolvRow({
 function DistRow({ label, pct, color }: { label: string; pct: number; color: string }) {
   const safe = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
   return (
-    <div className="mb-2">
+    <div style={{ marginBottom: 8 }}>
       <div className="flex items-center justify-between" style={{ fontSize: 10, color: C.textMuted }}>
         <span>{label}</span>
         <span style={{ color: C.textPrimary, fontVariantNumeric: "tabular-nums" }}>{safe.toFixed(1)}%</span>
