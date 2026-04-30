@@ -155,36 +155,39 @@ function HeroCard({
         background: C.cardBg,
         border: `0.5px solid ${highlight ? C.blueDark : C.cardBorder}`,
         borderRadius: 8,
-        padding: 12,
+          padding: 14,
         overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
       }}
     >
       <div
         style={{
-          fontSize: 9,
+            fontSize: 10,
           textTransform: "uppercase",
           letterSpacing: "0.08em",
           color: C.textDim,
-          fontWeight: 600,
+            fontWeight: 500,
         }}
       >
         {label}
       </div>
       <div
         style={{
-          fontSize: 22,
-          fontWeight: 500,
+            fontSize: 28,
+            fontWeight: 600,
+            lineHeight: 1,
           color: valueColor ?? C.textPrimary,
           fontVariantNumeric: "tabular-nums",
-          marginTop: 6,
+            marginTop: 8,
         }}
       >
         {value}
       </div>
       <div
         style={{
-          marginTop: 4,
-          fontSize: 10,
+            marginTop: 6,
+            fontSize: 11,
           color: deltaColor(delta),
           fontVariantNumeric: "tabular-nums",
         }}
@@ -192,7 +195,7 @@ function HeroCard({
         {deltaArrow(delta)} {delta == null ? "—" : `${Math.abs(delta).toFixed(1)}%`}
         {prevLabel && <span style={{ color: C.textDim }}> vs {prevLabel}</span>}
       </div>
-      <div style={{ marginTop: 6, fontSize: 9, color: "#4a5568" }}>{sub}</div>
+        <div style={{ marginTop: 6, fontSize: 10, color: "#4a5568" }}>{sub}</div>
       <Sparkline values={sparkValues} color={sparkColor} gradId={gradId} />
     </div>
   );
@@ -217,24 +220,26 @@ function RatioCard({
         background: C.card2Bg,
         border: `0.5px solid ${C.card2Border}`,
         borderRadius: 6,
-        padding: "8px 10px",
+        padding: "10px 12px",
+        display: "flex",
+        flexDirection: "column",
       }}
     >
-      <div style={{ fontSize: 9, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+      <div style={{ fontSize: 10, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 500 }}>
         {label}
       </div>
       <div
         style={{
-          fontSize: 15,
-          fontWeight: 500,
+          fontSize: 20,
+          fontWeight: 600,
           color: valueColor ?? C.textPrimary,
           fontVariantNumeric: "tabular-nums",
-          marginTop: 2,
+          marginTop: 4,
         }}
       >
         {value}
       </div>
-      <div style={{ fontSize: 9, color: deltaColor(delta), marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
+      <div style={{ fontSize: 10, color: deltaColor(delta), marginTop: 4, fontVariantNumeric: "tabular-nums" }}>
         {deltaArrow(delta)} {delta == null ? "—" : `${Math.abs(delta).toFixed(1)}%`}
         {prevLabel && <span style={{ color: C.textDim }}> vs {prevLabel}</span>}
       </div>
@@ -500,8 +505,8 @@ export default function Dashboard() {
                     </span>
                   </div>
                 </div>
-                <div style={{ height: 160 }}>
-                <ResponsiveContainer width="100%" height={160}>
+                <div style={{ height: 180 }}>
+                <ResponsiveContainer width="100%" height={180}>
                   <ComposedChart data={clampedChartData} margin={{ top: 6, right: 6, left: -8, bottom: 0 }}>
                     <defs>
                       <linearGradient id="gradIngresos" x1="0" y1="0" x2="0" y2="1">
@@ -618,7 +623,7 @@ export default function Dashboard() {
             </div>
 
             {/* ROW 4 — Bottom panels */}
-            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", flex: "0 0 220px", marginBottom: 0, alignItems: "stretch" }}>
+            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", flex: "0 0 240px", marginBottom: 0, alignItems: "stretch" }}>
               {/* Mini area chart */}
               <div
                 style={{
@@ -631,8 +636,8 @@ export default function Dashboard() {
                   height: "100%",
                 }}
               >
-                <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Ingresos por mes</div>
-                <div style={{ flex: 1, minHeight: 120 }}>
+                <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8, fontWeight: 500 }}>Ingresos por mes</div>
+                <div style={{ flex: 1, minHeight: 100 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chartData} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
                     <defs>
@@ -672,12 +677,15 @@ export default function Dashboard() {
                   flexDirection: "column",
                 }}
               >
-                <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Distribución de gastos</div>
+                <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8, fontWeight: 500 }}>Distribución de gastos</div>
                 <div style={{ flex: "1 1 auto" }}>
                   <DistRow label="G. Administración" pct={dist.adm} color={C.blue} />
                   <DistRow label="G. Operacionales" pct={dist.oper} color={C.indigo} />
                   <DistRow label="G. Financieros" pct={dist.fin} color={C.negative} />
                   <DistRow label="Costos de venta" pct={dist.costos} color={C.warning} />
+                </div>
+                <div style={{ fontSize: 11, color: C.textDim, marginTop: 4 }}>
+                  Total egresos: {formatM(Math.max(0, totals.ingresos - totals.utilOper))}
                 </div>
               </div>
 
@@ -693,7 +701,7 @@ export default function Dashboard() {
                   flexDirection: "column",
                 }}
               >
-                <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Top cuentas de ingreso</div>
+                <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8, fontWeight: 500 }}>Top cuentas de ingreso</div>
                 {topAgg.length === 0 ? (
                   <div style={{ fontSize: 10, color: C.textDim, padding: "8px 0" }}>Sin datos</div>
                 ) : (
@@ -705,14 +713,16 @@ export default function Dashboard() {
                         gridTemplateColumns: "1.4fr 1fr auto auto",
                         gap: 8,
                         alignItems: "center",
-                        padding: "8px 0",
+                        padding: "6px 0",
                         borderBottom: i < topAgg.length - 1 ? `0.5px solid #0d1525` : "none",
                         fontSize: 11,
                       }}
                     >
                       <span
                         style={{
-                          color: C.textMuted,
+                          color: "#a0aabf",
+                          fontSize: 11,
+                          fontWeight: 500,
                           overflow: "hidden",
                           textOverflow: "ellipsis",
                           whiteSpace: "nowrap",
@@ -720,7 +730,7 @@ export default function Dashboard() {
                       >
                         {r.nombre}
                       </span>
-                      <div style={{ height: 4, background: "#0d1525", borderRadius: 2, overflow: "hidden" }}>
+                      <div style={{ height: 3, background: "#0d1525", borderRadius: 2, overflow: "hidden", marginTop: 3 }}>
                         <div
                           style={{
                             width: `${Math.min(100, Math.max(0, r.part))}%`,
@@ -730,12 +740,13 @@ export default function Dashboard() {
                           }}
                         />
                       </div>
-                      <span style={{ color: C.textPrimary, fontVariantNumeric: "tabular-nums" }}>
+                      <span style={{ color: "#f0f4ff", fontSize: 13, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
                         {formatM(r.total)}
                       </span>
                       <span
                         style={{
-                          color: C.textDim,
+                          color: "#6b7a99",
+                          fontSize: 11,
                           fontVariantNumeric: "tabular-nums",
                           minWidth: 36,
                           textAlign: "right",
@@ -769,26 +780,26 @@ function BalanceRow({
   badgeColor: string;
 }) {
   return (
-    <div className="flex items-center justify-between py-1.5">
-      <span style={{ fontSize: 11, color: C.textMuted }}>{label}</span>
+    <div className="flex items-center justify-between py-2">
+      <span style={{ fontSize: 12, color: C.textMuted, fontWeight: 500 }}>{label}</span>
       <div className="flex items-center gap-2">
         <span
           style={{
-            fontSize: 13,
+            fontSize: 18,
             color: valueColor ?? C.textPrimary,
             fontVariantNumeric: "tabular-nums",
-            fontWeight: 500,
+            fontWeight: 600,
           }}
         >
           {value}
         </span>
         <span
           style={{
-            fontSize: 9,
+            fontSize: 10,
             color: badgeColor,
             background: `${badgeColor}1f`,
             border: `0.5px solid ${badgeColor}55`,
-            padding: "1px 6px",
+            padding: "2px 7px",
             borderRadius: 999,
             fontVariantNumeric: "tabular-nums",
           }}
@@ -824,9 +835,9 @@ function DistRow({ label, pct, color }: { label: string; pct: number; color: str
   const safe = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
   return (
     <div style={{ marginBottom: 10 }}>
-      <div className="flex items-center justify-between" style={{ fontSize: 11, color: C.textMuted }}>
-        <span>{label}</span>
-        <span style={{ color: C.textPrimary, fontVariantNumeric: "tabular-nums" }}>{safe.toFixed(1)}%</span>
+      <div className="flex items-center justify-between" style={{ color: C.textMuted }}>
+        <span style={{ fontSize: 11, fontWeight: 500 }}>{label}</span>
+        <span style={{ color: C.textPrimary, fontSize: 13, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{safe.toFixed(1)}%</span>
       </div>
       <div
         style={{
@@ -853,7 +864,7 @@ function StructureBar({ activos, pasivos, patrimonio }: { activos: number; pasiv
         <span>Estructura de financiación</span>
         <span style={{ fontVariantNumeric: "tabular-nums" }}>{pasivosPct.toFixed(1)}% deuda</span>
       </div>
-      <div style={{ height: 6, borderRadius: 3, background: "#1a2332", overflow: "hidden", display: "flex" }}>
+      <div style={{ height: 8, borderRadius: 4, background: "#1a2332", overflow: "hidden", display: "flex" }}>
         <div style={{ width: `${Math.min(pasivosPct, 100)}%`, background: C.negative, transition: "width 0.5s" }} />
         <div style={{ width: `${Math.min(patrimonioPct, 100)}%`, background: C.positive, transition: "width 0.5s" }} />
       </div>
@@ -891,56 +902,60 @@ function GaugeCard({
   const angle = pct * 180 - 90;
   const isGood = invert ? safe >= threshold : safe <= threshold;
   const color = isGood ? colorOk : colorBad;
-  const r = 28;
-  const cx = 36;
-  const cy = 36;
+  const r = 32;
+  const cx = 40;
+  const cy = 42;
   const arcLen = Math.PI * r;
   return (
     <div
       style={{
         background: C.card2Bg,
         borderRadius: 8,
-        padding: "10px 8px",
+        padding: 14,
         textAlign: "center",
         border: `0.5px solid ${C.card2Border}`,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "space-between",
       }}
     >
-      <svg width="72" height="40" viewBox="0 0 72 40" style={{ display: "block", margin: "0 auto" }}>
+      <svg width="80" height="48" viewBox="0 0 80 48" style={{ display: "block", margin: "0 auto" }}>
         <path
           d={`M ${cx - r},${cy} A ${r},${r} 0 0,1 ${cx + r},${cy}`}
           fill="none"
           stroke="#1a2332"
-          strokeWidth={5}
+          strokeWidth={6}
           strokeLinecap="round"
         />
         <path
           d={`M ${cx - r},${cy} A ${r},${r} 0 0,1 ${cx + r},${cy}`}
           fill="none"
           stroke={color}
-          strokeWidth={5}
+          strokeWidth={6}
           strokeLinecap="round"
           strokeDasharray={`${pct * arcLen} ${arcLen}`}
         />
         <circle
           cx={cx + r * Math.cos((angle * Math.PI) / 180)}
           cy={cy - r * Math.sin((angle * Math.PI) / 180)}
-          r={3}
+          r={3.5}
           fill={color}
         />
       </svg>
       <div
         style={{
-          fontSize: 13,
-          fontWeight: 500,
+          fontSize: 16,
+          fontWeight: 600,
           color,
-          marginTop: -2,
+          marginTop: 2,
           fontVariantNumeric: "tabular-nums",
         }}
       >
         {safe.toFixed(1)}
         {unit}
       </div>
-      <div style={{ fontSize: 9, color: C.textDim, marginTop: 2 }}>{label}</div>
+      <div style={{ fontSize: 10, color: C.textDim, marginTop: 4 }}>{label}</div>
     </div>
   );
 }
