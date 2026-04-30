@@ -294,9 +294,9 @@ export default function Cargue() {
           )}
 
           {insertError && (
-            <div className="flex items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
-              <AlertTriangle className="h-4 w-4" />
-              {insertError}
+            <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
+              <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+              <pre className="whitespace-pre-wrap font-mono text-[11px]">{insertError}</pre>
             </div>
           )}
 
