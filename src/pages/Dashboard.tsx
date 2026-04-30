@@ -16,13 +16,20 @@ import {
 import { useFiltros } from "@/context/FiltrosContext";
 import { useKpis } from "@/hooks/useKpis";
 import { useTendencia } from "@/hooks/useTendencia";
+import { useAlertaCuentas } from "@/hooks/useClasificacion";
 import { formatCOP, formatPct, toMillones } from "@/lib/format";
 import { EmptyState, ErrorState, LoadingSkeleton } from "@/components/dashboard/StateMessages";
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import { AlertTriangle, X } from "lucide-react";
 
 export default function Dashboard() {
   const filtros = useFiltros();
   const { data: kpis, isLoading: kpisLoading, isError: kpisError } = useKpis(filtros);
   const { data: tendencia, isLoading: tendLoading, isError: tendError } = useTendencia(filtros);
+  const { data: alerta } = useAlertaCuentas();
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  const pendientes = alerta?.pendientes_eri ?? 0;
 
   const kpiCards = [
     { label: "Ingresos Operativos", value: formatCOP(kpis?.ingresos), subtitle: "Periodo seleccionado", positive: true },
@@ -75,6 +82,23 @@ export default function Dashboard() {
             ))
           : kpiCards.map((k) => <KpiCard key={k.label} {...k} />)}
       </div>
+
+      {pendientes > 0 && !bannerDismissed && (
+        <div className="mt-4 flex items-center justify-between rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-300">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4" />
+            <span>
+              Hay <strong>{pendientes}</strong> cuentas sin clasificar que podrían afectar el ERI.{" "}
+              <Link to="/configuracion" className="underline hover:text-amber-200">
+                Ver en Configuración →
+              </Link>
+            </span>
+          </div>
+          <button onClick={() => setBannerDismissed(true)} className="opacity-70 hover:opacity-100" aria-label="Cerrar">
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
 
       <div className="mt-6 grid grid-cols-1 gap-4 lg:[grid-template-columns:45fr_30fr_25fr]">
         <Panel title="Tendencia: Ingresos · Margen Operacional">
