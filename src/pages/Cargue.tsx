@@ -88,6 +88,8 @@ export default function Cargue() {
     setInsertError(null);
 
     try {
+      console.log("[Cargue] Using Supabase client URL:", (supabase as any).supabaseUrl);
+
       // 1. Insert archivo record
       const archivoPayload = {
         nombre_archivo: file.name,
@@ -97,6 +99,7 @@ export default function Cargue() {
         filas_rechazadas: stats.invalid,
         estado: "OK",
       };
+      console.log("[Cargue] Inserting archivo:", archivoPayload);
       const { data: archivoRow, error: archivoErr } = await supabase
         .from("archivos_cargados")
         .insert(archivoPayload)
@@ -106,28 +109,51 @@ export default function Cargue() {
       const archivoId: string | undefined =
         archivoErr || !archivoRow ? undefined : (archivoRow as { id: string }).id;
 
-      if (archivoErr) console.warn("archivos_cargados insert failed:", archivoErr);
+      if (archivoErr) {
+        console.error("[Cargue] archivos_cargados insert failed:", archivoErr);
+      }
 
       // 2. Insert movimientos in batches
       const validRows = rows.filter((r) => r.valid).map((r) => rowToInsert(r, archivoId));
-      const failed: unknown[] = [];
+      console.log("[Cargue] First row to insert:", validRows[0]);
+      console.log("[Cargue] Total valid rows:", validRows.length);
+
+      const failed: { batchStart: number; error: string; code?: string; details?: string; hint?: string }[] = [];
       const BATCH = 500;
       let inserted = 0;
       let skipped = 0;
 
       for (let i = 0; i < validRows.length; i += BATCH) {
         const chunk = validRows.slice(i, i + BATCH);
-        const { data, error } = await supabase
-          .from("movimientos")
-          .upsert(chunk, { onConflict: "fecha_key,cuenta_key,comprobante,docto,debito,credito", ignoreDuplicates: true })
-          .select("id");
-        if (error) {
-          console.error("Batch insert error:", error, chunk.slice(0, 3));
-          failed.push({ batchStart: i, error: error.message });
-        } else {
-          const insertedInChunk = Array.isArray(data) ? data.length : 0;
-          inserted += insertedInChunk;
-          skipped += chunk.length - insertedInChunk;
+        try {
+          const { data, error } = await supabase
+            .from("movimientos")
+            .insert(chunk)
+            .select("id");
+          if (error) {
+            console.error("[Cargue] Batch insert error:", {
+              code: error.code,
+              message: error.message,
+              details: error.details,
+              hint: error.hint,
+              batchStart: i,
+              sampleRow: chunk[0],
+            });
+            failed.push({
+              batchStart: i,
+              error: error.message,
+              code: error.code,
+              details: error.details ?? undefined,
+              hint: error.hint ?? undefined,
+            });
+          } else {
+            const insertedInChunk = Array.isArray(data) ? data.length : 0;
+            inserted += insertedInChunk;
+            skipped += chunk.length - insertedInChunk;
+          }
+        } catch (batchErr: any) {
+          console.error("[Cargue] Batch threw exception:", batchErr);
+          failed.push({ batchStart: i, error: batchErr?.message ?? String(batchErr) });
         }
       }
 
@@ -135,19 +161,28 @@ export default function Cargue() {
       setSkippedCount(skipped);
 
       if (failed.length > 0 && inserted === 0) {
-        setInsertError("No se pudo importar ningún registro. Revisa la consola para más detalles.");
+        const first = failed[0];
+        const detailParts = [
+          first.code ? `Código: ${first.code}` : null,
+          first.error ? `Mensaje: ${first.error}` : null,
+          first.details ? `Detalles: ${first.details}` : null,
+          first.hint ? `Sugerencia: ${first.hint}` : null,
+        ].filter(Boolean);
+        setInsertError(
+          `No se pudo importar ningún registro.\n${detailParts.join("\n")}\n(${failed.length} lote(s) fallaron)`
+        );
         setStep("preview");
         return;
       }
 
       if (failed.length > 0) {
-        toast.warning(`${inserted} registros importados, algunos lotes fallaron.`);
+        toast.warning(`${inserted} registros importados, ${failed.length} lote(s) fallaron: ${failed[0].error}`);
       }
 
       setStep("success");
-    } catch (err) {
-      console.error(err);
-      setInsertError("Error inesperado durante la importación.");
+    } catch (err: any) {
+      console.error("[Cargue] Unexpected error:", err);
+      setInsertError(`Error inesperado: ${err?.message ?? String(err)}`);
       setStep("preview");
     }
   };
