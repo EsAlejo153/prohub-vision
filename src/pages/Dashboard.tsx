@@ -585,6 +585,7 @@ export default function Dashboard() {
                     badge={formatPctV(autonomia)}
                     badgeColor={autonomia < 0 ? C.negative : C.positive}
                   />
+                  <StructureBar activos={balance.activos} pasivos={balance.pasivos} patrimonio={balance.patrimonio} />
                 </div>
                 <div
                   style={{
@@ -596,9 +597,12 @@ export default function Dashboard() {
                   }}
                 >
                   <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Ratios de solvencia</div>
-                  <SolvRow label="Endeudamiento %" value={endeudamiento} good={(v) => v < 60} />
-                  <SolvRow label="Autonomía %" value={autonomia} good={(v) => v > 30} />
-                  <SolvRow label="ROE %" value={roe} good={(v) => v > 0} />
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                    <GaugeCard label="Endeudamiento" value={endeudamiento} unit="%" min={0} max={200} threshold={100} colorOk={C.positive} colorBad={C.negative} />
+                    <GaugeCard label="Autonomía" value={autonomia} unit="%" min={-100} max={100} threshold={0} colorOk={C.positive} colorBad={C.negative} invert />
+                    <GaugeCard label="ROE" value={roe} unit="%" min={-20} max={20} threshold={0} colorOk={C.positive} colorBad={C.negative} invert />
+                    <GaugeCard label="ROA" value={roa} unit="%" min={-20} max={20} threshold={0} colorOk={C.positive} colorBad={C.negative} invert />
+                  </div>
                 </div>
               </div>
             </div>
