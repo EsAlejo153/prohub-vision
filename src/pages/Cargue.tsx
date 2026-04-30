@@ -24,6 +24,7 @@ export default function Cargue() {
   const [parsing, setParsing] = useState(false);
   const [rows, setRows] = useState<ParsedRow[]>([]);
   const [insertedCount, setInsertedCount] = useState(0);
+  const [skippedCount, setSkippedCount] = useState(0);
   const [insertError, setInsertError] = useState<string | null>(null);
 
   const stats = useMemo(() => {
@@ -112,19 +113,26 @@ export default function Cargue() {
       const failed: unknown[] = [];
       const BATCH = 500;
       let inserted = 0;
+      let skipped = 0;
 
       for (let i = 0; i < validRows.length; i += BATCH) {
         const chunk = validRows.slice(i, i + BATCH);
-        const { error } = await supabase.from("movimientos").insert(chunk);
+        const { data, error } = await supabase
+          .from("movimientos")
+          .upsert(chunk, { onConflict: "fecha_key,cuenta_key,comprobante,docto,debito,credito", ignoreDuplicates: true })
+          .select("id");
         if (error) {
           console.error("Batch insert error:", error, chunk.slice(0, 3));
           failed.push({ batchStart: i, error: error.message });
         } else {
-          inserted += chunk.length;
+          const insertedInChunk = Array.isArray(data) ? data.length : 0;
+          inserted += insertedInChunk;
+          skipped += chunk.length - insertedInChunk;
         }
       }
 
       setInsertedCount(inserted);
+      setSkippedCount(skipped);
 
       if (failed.length > 0 && inserted === 0) {
         setInsertError("No se pudo importar ningún registro. Revisa la consola para más detalles.");
@@ -148,6 +156,7 @@ export default function Cargue() {
     setFile(null);
     setRows([]);
     setInsertedCount(0);
+    setSkippedCount(0);
     setInsertError(null);
     setStep("upload");
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -314,9 +323,20 @@ export default function Cargue() {
         <div className="mt-6 flex flex-col items-center justify-center rounded-lg border border-success/30 bg-success/5 p-12 text-center">
           <CheckCircle2 className="h-16 w-16 text-success" />
           <h2 className="mt-4 text-2xl font-bold text-foreground">¡Importación exitosa!</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Se importaron {insertedCount.toLocaleString("es-CO")} registros de {stats.total.toLocaleString("es-CO")} totales
-          </p>
+          <div className="mt-4 grid w-full max-w-md grid-cols-1 gap-2 sm:grid-cols-3">
+            <div className="rounded-md border border-success/30 bg-success/10 p-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-success">Importados</div>
+              <div className="mt-1 text-xl font-bold text-success tabular-nums">{insertedCount.toLocaleString("es-CO")}</div>
+            </div>
+            <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-500">Duplicados omitidos</div>
+              <div className="mt-1 text-xl font-bold text-amber-500 tabular-nums">{skippedCount.toLocaleString("es-CO")}</div>
+            </div>
+            <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-destructive">Con errores</div>
+              <div className="mt-1 text-xl font-bold text-destructive tabular-nums">{stats.invalid.toLocaleString("es-CO")}</div>
+            </div>
+          </div>
           <div className="mt-6 flex gap-3">
             <Button onClick={() => navigate("/dashboard")}>Ver en Dashboard</Button>
             <Button variant="outline" onClick={reset}>Cargar otro archivo</Button>
