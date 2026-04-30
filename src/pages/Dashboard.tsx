@@ -677,12 +677,19 @@ export default function Dashboard() {
                   flexDirection: "column",
                 }}
               >
-                <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Distribución de gastos</div>
+                <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8, fontWeight: 500 }}>Distribución de gastos</div>
                 <div style={{ flex: "1 1 auto" }}>
                   <DistRow label="G. Administración" pct={dist.adm} color={C.blue} />
                   <DistRow label="G. Operacionales" pct={dist.oper} color={C.indigo} />
                   <DistRow label="G. Financieros" pct={dist.fin} color={C.negative} />
                   <DistRow label="Costos de venta" pct={dist.costos} color={C.warning} />
+                </div>
+                <div style={{ fontSize: 11, color: C.textDim, marginTop: 4 }}>
+                  Total egresos: {formatM(
+                    (totals.ingresos || 0) > 0
+                      ? (totals.ingresos * (dist.adm + dist.oper + dist.fin + dist.costos)) / 100
+                      : 0
+                  )}
                 </div>
               </div>
 
