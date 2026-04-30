@@ -7,9 +7,7 @@ export default function AppLayout({ title, children }: { title: string; children
     <div className="min-h-screen bg-background text-foreground">
       <Sidebar />
       <TopBar title={title} />
-      <main className="ml-[180px] pt-14">
-        <div className="p-6">{children}</div>
-      </main>
+      <main className="ml-[180px] pt-14">{children}</main>
     </div>
   );
 }
