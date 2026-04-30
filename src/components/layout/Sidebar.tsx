@@ -1,7 +1,8 @@
 import { NavLink, Link } from "react-router-dom";
-import { BarChart3, TrendingUp, Scale, Upload, Settings, LogOut } from "lucide-react";
+import { BarChart3, TrendingUp, Scale, Upload, Settings, LogOut, Shield } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { useAlertaCuentas } from "@/hooks/useClasificacion";
+import { usePerfil } from "@/hooks/useAdmin";
 
 const main = [
   { to: "/dashboard", label: "Dashboard Financiero", icon: BarChart3 },
@@ -18,6 +19,8 @@ export default function Sidebar() {
   const initial = user?.email?.[0]?.toUpperCase() ?? "?";
   const { data: alerta } = useAlertaCuentas();
   const pendientes = alerta?.pendientes_eri ?? 0;
+  const { data: perfil } = usePerfil(user?.id);
+  const isAdmin = perfil?.rol === "admin";
 
   return (
     <aside
@@ -51,6 +54,15 @@ export default function Sidebar() {
             ))}
           </div>
         </div>
+
+        {isAdmin && (
+          <div className="mt-6">
+            <SectionLabel>Administración</SectionLabel>
+            <div className="mt-1 space-y-0.5">
+              <NavItem to="/admin" label="Admin" icon={Shield} />
+            </div>
+          </div>
+        )}
       </nav>
 
       <div className="border-t border-border p-3">

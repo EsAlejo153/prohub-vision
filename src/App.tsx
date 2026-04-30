@@ -12,9 +12,11 @@ import Balance from "./pages/Balance.tsx";
 import Cargue from "./pages/Cargue.tsx";
 import Configuracion from "./pages/Configuracion.tsx";
 import Profile from "./pages/Profile.tsx";
+import Admin from "./pages/Admin.tsx";
 import { AuthProvider } from "./context/AuthContext";
 import { FiltrosProvider } from "./context/FiltrosContext";
 import ProtectedRoute from "./components/ProtectedRoute";
+import AdminRoute from "./components/AdminRoute";
 
 const queryClient = new QueryClient();
 
@@ -35,6 +37,7 @@ const App = () => (
             <Route path="/cargue" element={<ProtectedRoute><Cargue /></ProtectedRoute>} />
             <Route path="/configuracion" element={<ProtectedRoute><Configuracion /></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
+            <Route path="/admin" element={<ProtectedRoute><AdminRoute><Admin /></AdminRoute></ProtectedRoute>} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
