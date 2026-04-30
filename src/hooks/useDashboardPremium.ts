@@ -144,3 +144,31 @@ export function useTopCuentas(filtros: FiltroDashboard) {
     },
   });
 }
+
+export interface BalanceTotals {
+  activos: number;
+  pasivos: number;
+  patrimonio: number;
+}
+
+export function useBalanceFallback(filtros: FiltroDashboard, enabled: boolean) {
+  return useQuery({
+    queryKey: ["balance_fallback", filtros],
+    enabled,
+    queryFn: async (): Promise<BalanceTotals> => {
+      let q = supabase.from("movimientos").select("clase_cod, saldo_final");
+      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+      const { data, error } = await q;
+      if (error) throw error;
+      const rows = (data ?? []) as { clase_cod: string | null; saldo_final: number | null }[];
+      const sumOf = (cls: string) =>
+        rows.filter((r) => String(r.clase_cod) === cls).reduce((s, r) => s + (Number(r.saldo_final) || 0), 0);
+      const activos = sumOf("1");
+      const pasivos = sumOf("2");
+      // Patrimonio puede venir como clase 3, o derivarse
+      const patrimonio3 = sumOf("3");
+      const patrimonio = patrimonio3 !== 0 ? patrimonio3 : activos - pasivos;
+      return { activos, pasivos, patrimonio };
+    },
+  });
+}
