@@ -636,8 +636,8 @@ export default function Dashboard() {
                   height: "100%",
                 }}
               >
-                <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Ingresos por mes</div>
-                <div style={{ flex: 1, minHeight: 120 }}>
+                <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8, fontWeight: 500 }}>Ingresos por mes</div>
+                <div style={{ flex: 1, minHeight: 100 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chartData} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
                     <defs>
@@ -701,7 +701,7 @@ export default function Dashboard() {
                   flexDirection: "column",
                 }}
               >
-                <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Top cuentas de ingreso</div>
+                <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8, fontWeight: 500 }}>Top cuentas de ingreso</div>
                 {topAgg.length === 0 ? (
                   <div style={{ fontSize: 10, color: C.textDim, padding: "8px 0" }}>Sin datos</div>
                 ) : (
@@ -713,14 +713,16 @@ export default function Dashboard() {
                         gridTemplateColumns: "1.4fr 1fr auto auto",
                         gap: 8,
                         alignItems: "center",
-                        padding: "8px 0",
+                        padding: "6px 0",
                         borderBottom: i < topAgg.length - 1 ? `0.5px solid #0d1525` : "none",
                         fontSize: 11,
                       }}
                     >
                       <span
                         style={{
-                          color: C.textMuted,
+                          color: "#a0aabf",
+                          fontSize: 11,
+                          fontWeight: 500,
                           overflow: "hidden",
                           textOverflow: "ellipsis",
                           whiteSpace: "nowrap",
@@ -728,7 +730,7 @@ export default function Dashboard() {
                       >
                         {r.nombre}
                       </span>
-                      <div style={{ height: 4, background: "#0d1525", borderRadius: 2, overflow: "hidden" }}>
+                      <div style={{ height: 3, background: "#0d1525", borderRadius: 2, overflow: "hidden", marginTop: 3 }}>
                         <div
                           style={{
                             width: `${Math.min(100, Math.max(0, r.part))}%`,
@@ -738,12 +740,13 @@ export default function Dashboard() {
                           }}
                         />
                       </div>
-                      <span style={{ color: C.textPrimary, fontVariantNumeric: "tabular-nums" }}>
+                      <span style={{ color: "#f0f4ff", fontSize: 13, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
                         {formatM(r.total)}
                       </span>
                       <span
                         style={{
-                          color: C.textDim,
+                          color: "#6b7a99",
+                          fontSize: 11,
                           fontVariantNumeric: "tabular-nums",
                           minWidth: 36,
                           textAlign: "right",
