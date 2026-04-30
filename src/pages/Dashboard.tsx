@@ -835,9 +835,9 @@ function DistRow({ label, pct, color }: { label: string; pct: number; color: str
   const safe = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
   return (
     <div style={{ marginBottom: 10 }}>
-      <div className="flex items-center justify-between" style={{ fontSize: 11, color: C.textMuted }}>
-        <span>{label}</span>
-        <span style={{ color: C.textPrimary, fontVariantNumeric: "tabular-nums" }}>{safe.toFixed(1)}%</span>
+      <div className="flex items-center justify-between" style={{ color: C.textMuted }}>
+        <span style={{ fontSize: 11, fontWeight: 500 }}>{label}</span>
+        <span style={{ color: C.textPrimary, fontSize: 13, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{safe.toFixed(1)}%</span>
       </div>
       <div
         style={{
