@@ -491,7 +491,7 @@ export default function Dashboard() {
                 }}
               >
                 <div className="flex items-center justify-between mb-2">
-                  <div style={{ fontSize: 10, color: C.textMuted }}>
+                  <div style={{ fontSize: 12, color: C.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
                     Ingresos vs Margen operacional — por mes
                   </div>
                   <div className="flex items-center gap-3" style={{ fontSize: 10, color: C.textMuted }}>
