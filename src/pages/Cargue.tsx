@@ -128,7 +128,10 @@ export default function Cargue() {
         try {
           const { data, error } = await supabase
             .from("movimientos")
-            .insert(chunk)
+            .upsert(chunk, {
+              onConflict: "compania,cuenta_key,fecha_key,comprobante,debito,credito",
+              ignoreDuplicates: true,
+            })
             .select("id");
           if (error) {
             console.error("[Cargue] Batch insert error:", {
