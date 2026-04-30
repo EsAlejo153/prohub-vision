@@ -685,11 +685,7 @@ export default function Dashboard() {
                   <DistRow label="Costos de venta" pct={dist.costos} color={C.warning} />
                 </div>
                 <div style={{ fontSize: 11, color: C.textDim, marginTop: 4 }}>
-                  Total egresos: {formatM(
-                    (totals.ingresos || 0) > 0
-                      ? (totals.ingresos * (dist.adm + dist.oper + dist.fin + dist.costos)) / 100
-                      : 0
-                  )}
+                  Total egresos: {formatM(Math.max(0, totals.ingresos - totals.utilOper))}
                 </div>
               </div>
 
