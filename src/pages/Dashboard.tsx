@@ -864,7 +864,7 @@ function StructureBar({ activos, pasivos, patrimonio }: { activos: number; pasiv
         <span>Estructura de financiación</span>
         <span style={{ fontVariantNumeric: "tabular-nums" }}>{pasivosPct.toFixed(1)}% deuda</span>
       </div>
-      <div style={{ height: 6, borderRadius: 3, background: "#1a2332", overflow: "hidden", display: "flex" }}>
+      <div style={{ height: 8, borderRadius: 4, background: "#1a2332", overflow: "hidden", display: "flex" }}>
         <div style={{ width: `${Math.min(pasivosPct, 100)}%`, background: C.negative, transition: "width 0.5s" }} />
         <div style={{ width: `${Math.min(patrimonioPct, 100)}%`, background: C.positive, transition: "width 0.5s" }} />
       </div>
