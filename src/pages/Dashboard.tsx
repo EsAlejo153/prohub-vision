@@ -505,8 +505,8 @@ export default function Dashboard() {
                     </span>
                   </div>
                 </div>
-                <div style={{ height: 160 }}>
-                <ResponsiveContainer width="100%" height={160}>
+                <div style={{ flex: "1 1 auto", minHeight: 0 }}>
+                <ResponsiveContainer width="100%" height="100%">
                   <ComposedChart data={clampedChartData} margin={{ top: 6, right: 6, left: -8, bottom: 0 }}>
                     <defs>
                       <linearGradient id="gradIngresos" x1="0" y1="0" x2="0" y2="1">
