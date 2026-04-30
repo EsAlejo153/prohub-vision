@@ -155,36 +155,39 @@ function HeroCard({
         background: C.cardBg,
         border: `0.5px solid ${highlight ? C.blueDark : C.cardBorder}`,
         borderRadius: 8,
-        padding: 12,
+          padding: 14,
         overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
       }}
     >
       <div
         style={{
-          fontSize: 9,
+            fontSize: 10,
           textTransform: "uppercase",
           letterSpacing: "0.08em",
           color: C.textDim,
-          fontWeight: 600,
+            fontWeight: 500,
         }}
       >
         {label}
       </div>
       <div
         style={{
-          fontSize: 22,
-          fontWeight: 500,
+            fontSize: 28,
+            fontWeight: 600,
+            lineHeight: 1,
           color: valueColor ?? C.textPrimary,
           fontVariantNumeric: "tabular-nums",
-          marginTop: 6,
+            marginTop: 8,
         }}
       >
         {value}
       </div>
       <div
         style={{
-          marginTop: 4,
-          fontSize: 10,
+            marginTop: 6,
+            fontSize: 11,
           color: deltaColor(delta),
           fontVariantNumeric: "tabular-nums",
         }}
@@ -192,7 +195,7 @@ function HeroCard({
         {deltaArrow(delta)} {delta == null ? "—" : `${Math.abs(delta).toFixed(1)}%`}
         {prevLabel && <span style={{ color: C.textDim }}> vs {prevLabel}</span>}
       </div>
-      <div style={{ marginTop: 6, fontSize: 9, color: "#4a5568" }}>{sub}</div>
+        <div style={{ marginTop: 6, fontSize: 10, color: "#4a5568" }}>{sub}</div>
       <Sparkline values={sparkValues} color={sparkColor} gradId={gradId} />
     </div>
   );
@@ -217,24 +220,26 @@ function RatioCard({
         background: C.card2Bg,
         border: `0.5px solid ${C.card2Border}`,
         borderRadius: 6,
-        padding: "8px 10px",
+        padding: "10px 12px",
+        display: "flex",
+        flexDirection: "column",
       }}
     >
-      <div style={{ fontSize: 9, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+      <div style={{ fontSize: 10, color: C.textDim, textTransform: "uppercase", letterSpacing: "0.06em", fontWeight: 500 }}>
         {label}
       </div>
       <div
         style={{
-          fontSize: 15,
-          fontWeight: 500,
+          fontSize: 20,
+          fontWeight: 600,
           color: valueColor ?? C.textPrimary,
           fontVariantNumeric: "tabular-nums",
-          marginTop: 2,
+          marginTop: 4,
         }}
       >
         {value}
       </div>
-      <div style={{ fontSize: 9, color: deltaColor(delta), marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
+      <div style={{ fontSize: 10, color: deltaColor(delta), marginTop: 4, fontVariantNumeric: "tabular-nums" }}>
         {deltaArrow(delta)} {delta == null ? "—" : `${Math.abs(delta).toFixed(1)}%`}
         {prevLabel && <span style={{ color: C.textDim }}> vs {prevLabel}</span>}
       </div>
