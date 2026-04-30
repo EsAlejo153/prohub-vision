@@ -188,9 +188,14 @@ function HistorialTab() {
 
   const handleRevertir = async () => {
     if (!confirm) return;
+    console.log("archivo_id:", confirm.id);
+    if (!confirm.id) {
+      toast.error("ID de archivo inválido");
+      return;
+    }
     setWorking(true);
     try {
-      await revertirCargue(confirm.archivo_id);
+      await revertirCargue(confirm.id);
       toast.success("Cargue revertido");
       qc.invalidateQueries({ queryKey: ["historial_cargues"] });
       qc.invalidateQueries({ queryKey: ["audit_log"] });
@@ -241,7 +246,7 @@ function HistorialTab() {
                     : "text-amber-400";
                 return (
                   <>
-                    <TableRow key={r.archivo_id}>
+                    <TableRow key={r.id}>
                       <TableCell className={`max-w-[220px] truncate font-medium ${color}`}>{r.nombre_archivo}</TableCell>
                       <TableCell className="text-sm">{r.compania ?? "--"}</TableCell>
                       <TableCell className="text-xs text-muted-foreground">{fmtDate(r.created_at)}</TableCell>
@@ -255,7 +260,7 @@ function HistorialTab() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => setExpanded(expanded === r.archivo_id ? null : r.archivo_id)}
+                          onClick={() => setExpanded(expanded === r.id ? null : r.id)}
                         >
                           Ver detalle
                         </Button>
@@ -266,7 +271,7 @@ function HistorialTab() {
                         )}
                       </TableCell>
                     </TableRow>
-                    {expanded === r.archivo_id && (
+                    {expanded === r.id && (
                       <TableRow>
                         <TableCell colSpan={8} className="bg-background/40">
                           <div className="grid grid-cols-3 gap-3 text-xs">
