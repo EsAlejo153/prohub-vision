@@ -505,7 +505,7 @@ export default function Dashboard() {
                     </span>
                   </div>
                 </div>
-                <div style={{ flex: "1 1 auto", minHeight: 0 }}>
+                <div style={{ height: 180 }}>
                 <ResponsiveContainer width="100%" height={180}>
                   <ComposedChart data={clampedChartData} margin={{ top: 6, right: 6, left: -8, bottom: 0 }}>
                     <defs>
