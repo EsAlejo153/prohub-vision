@@ -204,7 +204,7 @@ export function useMovimientos(filtros: MovimientosFiltros, enabled: boolean) {
         .order("fecha", { ascending: false })
         .range(page * pageSize, page * pageSize + pageSize - 1);
       if (error) throw error;
-      return { rows: (data ?? []) as MovimientoRow[], count: count ?? 0 };
+      return { rows: ((data ?? []) as unknown) as MovimientoRow[], count: count ?? 0 };
     },
   });
 }
@@ -219,7 +219,7 @@ export function useDistinctMeses() {
         .order("año_mes_num", { ascending: false });
       if (error) throw error;
       const set = new Set<number>();
-      for (const r of (data ?? []) as Array<{ año_mes_num: number }>) {
+      for (const r of ((data ?? []) as unknown) as Array<{ año_mes_num: number }>) {
         if (r.año_mes_num) set.add(r.año_mes_num);
       }
       return Array.from(set);
