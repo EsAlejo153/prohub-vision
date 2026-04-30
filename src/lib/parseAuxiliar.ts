@@ -104,21 +104,59 @@ function toNumber(v: unknown): number {
 
 export function validateAndCompute(raw: RawRow): ParsedRow {
   const errors: string[] = [];
+  const fieldErrors: Partial<Record<ErrorField, string>> = {};
+
+  // Detect fully empty row
+  const allValues = Object.values(raw);
+  const rowEmpty = allValues.every(
+    (v) => v == null || (typeof v === "string" && v.trim() === "") || v === 0,
+  );
+  // Treat as empty only when key fields are blank
+  const keyBlank =
+    !String(raw.Compañia ?? "").trim() &&
+    !String(raw.Cuenta ?? "").trim() &&
+    !raw.Fecha;
+  if (keyBlank) {
+    errors.push("Fila vacía");
+    fieldErrors.__row__ = "Fila vacía";
+    return {
+      raw,
+      errors,
+      fieldErrors,
+      rowEmpty: true,
+      valid: false,
+    };
+  }
 
   const compania = String(raw.Compañia ?? "").trim();
-  if (!compania) errors.push("Compañia vacía");
+  if (!compania) {
+    errors.push("Compañía no puede estar vacía");
+    fieldErrors["Compañia"] = "Compañía no puede estar vacía";
+  }
 
   const cuentaRaw = String(raw.Cuenta ?? "").trim();
   const cuenta_key = cuentaRaw.replace(/\D/g, "");
-  if (!cuenta_key || !/^\d{4,}$/.test(cuenta_key)) errors.push("Cuenta inválida (mín. 4 dígitos)");
+  if (!cuenta_key || !/^\d{4,}$/.test(cuenta_key)) {
+    errors.push("Cuenta inválida: debe tener mínimo 4 dígitos");
+    fieldErrors["Cuenta"] = "Cuenta inválida: debe tener mínimo 4 dígitos";
+  }
 
   const fecha = parseExcelDate(raw.Fecha);
-  if (!fecha) errors.push("Fecha inválida");
+  if (!fecha) {
+    errors.push("Fecha inválida o vacía");
+    fieldErrors["Fecha"] = "Fecha inválida o vacía";
+  }
 
   const debito = toNumber(raw.Débito);
   const credito = toNumber(raw.Crédito);
-  if (!Number.isFinite(debito) || debito < 0) errors.push("Débito inválido");
-  if (!Number.isFinite(credito) || credito < 0) errors.push("Crédito inválido");
+  if (!Number.isFinite(debito) || debito < 0) {
+    errors.push("El débito debe ser un número");
+    fieldErrors["Débito"] = "El débito debe ser un número";
+  }
+  if (!Number.isFinite(credito) || credito < 0) {
+    errors.push("El crédito debe ser un número");
+    fieldErrors["Crédito"] = "El crédito debe ser un número";
+  }
 
   let fecha_key: string | undefined;
   let año_mes_num: number | undefined;
@@ -157,6 +195,7 @@ export function validateAndCompute(raw: RawRow): ParsedRow {
     concepto: String(raw.Concepto ?? "").trim() || undefined,
     usuario: String(raw.Usuario ?? "").trim() || undefined,
     errors,
+    fieldErrors,
     valid: errors.length === 0,
   };
 }
@@ -168,7 +207,11 @@ export async function parseWorkbook(file: File): Promise<{ rows: ParsedRow[]; sh
   if (!sheetName) return { rows: [], sheetFound: false };
   const ws = wb.Sheets[sheetName];
   const json = XLSX.utils.sheet_to_json<RawRow>(ws, { defval: "", raw: true });
-  const rows = json.map(validateAndCompute);
+  const rows = json.map((r, i) => {
+    const parsed = validateAndCompute(r);
+    parsed.excelRow = i + 2; // +1 for header, +1 for 1-index
+    return parsed;
+  });
   return { rows, sheetFound: true };
 }
 
