@@ -7,6 +7,7 @@ import { useEmpresas } from "@/hooks/useEmpresas";
 import { parseWorkbook, formatBytes, rowToInsert, type ParsedRow } from "@/lib/parseAuxiliar";
 import { supabase } from "@/lib/external-supabase";
 import { toast } from "sonner";
+import { ErrorViewer } from "@/components/cargue/ErrorViewer";
 
 type Step = "upload" | "preview" | "processing" | "success";
 
@@ -303,38 +304,7 @@ export default function Cargue() {
             </div>
           )}
 
-          <div className="overflow-auto rounded-md border border-border bg-card">
-            <table className="w-full text-[11px]">
-              <thead className="bg-background/40">
-                <tr>
-                  {["#", "Compañia", "Cuenta", "Fecha", "Débito", "Crédito", "CC", "Errores"].map((h) => (
-                    <th key={h} className="whitespace-nowrap px-2 py-2 text-left font-semibold uppercase tracking-wider text-muted-foreground">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.slice(0, 20).map((r, i) => (
-                  <tr key={i} className={`border-t border-border/40 ${!r.valid ? "bg-destructive/10" : ""}`}>
-                    <td className="px-2 py-1 text-muted-foreground">{i + 1}</td>
-                    <td className="px-2 py-1">{r.compania ?? "--"}</td>
-                    <td className="px-2 py-1 tabular-nums">{r.cuenta_key ?? String(r.raw.Cuenta ?? "")}</td>
-                    <td className="px-2 py-1">{r.fecha ? r.fecha.toISOString().slice(0, 10) : "--"}</td>
-                    <td className="px-2 py-1 text-right tabular-nums">{(r.debito ?? 0).toLocaleString("es-CO")}</td>
-                    <td className="px-2 py-1 text-right tabular-nums">{(r.credito ?? 0).toLocaleString("es-CO")}</td>
-                    <td className="px-2 py-1">{r.cc_key}</td>
-                    <td className="px-2 py-1 text-destructive">{r.errors.join(", ")}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {rows.length > 20 && (
-              <div className="border-t border-border bg-background/40 px-3 py-2 text-[11px] text-muted-foreground">
-                Mostrando 20 de {rows.length.toLocaleString("es-CO")} filas
-              </div>
-            )}
-          </div>
+          <ErrorViewer rows={rows} onRowsChange={setRows} />
 
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={reset}>Cancelar</Button>
