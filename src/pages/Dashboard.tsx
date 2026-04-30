@@ -9,6 +9,9 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
+  PieChart,
+  Pie,
+  Cell,
 } from "recharts";
 import { useFiltros } from "@/context/FiltrosContext";
 import {
@@ -279,12 +282,9 @@ export default function Dashboard() {
     };
   }, [rows]);
 
-  // Balance fallback if zero
-  const balanceZero =
-    !isLoading && rows.length > 0 && totals.activos === 0 && totals.pasivos === 0 && totals.patrimonio === 0;
-  const { data: balFallback } = useBalanceFallback(filtros, balanceZero);
-
-  const balance = balanceZero && balFallback
+  // Always query movimientos directly for balance (more reliable than view aggregates)
+  const { data: balFallback } = useBalanceFallback(filtros, true);
+  const balance = balFallback && (balFallback.activos !== 0 || balFallback.pasivos !== 0 || balFallback.patrimonio !== 0)
     ? balFallback
     : { activos: totals.activos, pasivos: totals.pasivos, patrimonio: totals.patrimonio };
 
@@ -343,10 +343,20 @@ export default function Dashboard() {
   const margenBruto = last?.margen_bruto_pct ?? 0;
   const margenNeto = last?.margen_neto_pct ?? 0;
   const costoIngreso = last?.costo_ingreso_pct ?? 0;
-  const roe = last?.roe_pct ?? 0;
-  const endeudamiento = last?.endeudamiento_pct ?? 0;
-  const autonomia = last?.autonomia_pct ?? 0;
-  const roa = last?.roa_pct ?? 0;
+  // Derive from balance directly (avoids $0 from view)
+  const safeDiv = (a: number, b: number) => (b === 0 ? 0 : (a / b) * 100);
+  const endeudamiento = balance.activos !== 0
+    ? safeDiv(Math.abs(balance.pasivos), Math.abs(balance.activos))
+    : last?.endeudamiento_pct ?? 0;
+  const autonomia = balance.activos !== 0
+    ? safeDiv(balance.patrimonio, Math.abs(balance.activos))
+    : last?.autonomia_pct ?? 0;
+  const roe = balance.patrimonio !== 0
+    ? safeDiv(totals.utilNeta, Math.abs(balance.patrimonio))
+    : last?.roe_pct ?? 0;
+  const roa = balance.activos !== 0
+    ? safeDiv(totals.utilNeta, Math.abs(balance.activos))
+    : last?.roa_pct ?? 0;
 
   const clampedChartData = useMemo(
     () =>
@@ -608,7 +618,7 @@ export default function Dashboard() {
             </div>
 
             {/* ROW 4 — Bottom panels */}
-            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", flex: "0 0 200px", marginBottom: 0 }}>
+            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", flex: "0 0 220px", marginBottom: 0, alignItems: "stretch" }}>
               {/* Mini area chart */}
               <div
                 style={{
@@ -618,11 +628,12 @@ export default function Dashboard() {
                   padding: 12,
                   display: "flex",
                   flexDirection: "column",
+                  height: "100%",
                 }}
               >
                 <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Ingresos por mes</div>
-                <div style={{ flex: "1 1 auto", minHeight: 0 }}>
-                <ResponsiveContainer width="100%" height="100%" minHeight={160}>
+                <div style={{ flex: 1, minHeight: 120 }}>
+                <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chartData} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
                     <defs>
                       <linearGradient id="gradMini" x1="0" y1="0" x2="0" y2="1">
@@ -656,13 +667,45 @@ export default function Dashboard() {
                   border: `0.5px solid ${C.cardBorder}`,
                   borderRadius: 8,
                   padding: 14,
+                  height: "100%",
+                  display: "flex",
+                  flexDirection: "column",
                 }}
               >
                 <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Distribución de gastos</div>
-                <DistRow label="G. Administración" pct={dist.adm} color={C.blue} />
-                <DistRow label="G. Operacionales" pct={dist.oper} color={C.indigo} />
-                <DistRow label="G. Financieros" pct={dist.fin} color={C.negative} />
-                <DistRow label="Costos de venta" pct={dist.costos} color={C.warning} />
+                <div style={{ flex: "1 1 auto" }}>
+                  <DistRow label="G. Administración" pct={dist.adm} color={C.blue} />
+                  <DistRow label="G. Operacionales" pct={dist.oper} color={C.indigo} />
+                  <DistRow label="G. Financieros" pct={dist.fin} color={C.negative} />
+                  <DistRow label="Costos de venta" pct={dist.costos} color={C.warning} />
+                </div>
+                <div style={{ height: 80, marginTop: 4 }}>
+                  <ResponsiveContainer width="100%" height={80}>
+                    <PieChart>
+                      <Pie
+                        data={[
+                          { name: "Adm", value: dist.adm },
+                          { name: "Oper", value: dist.oper },
+                          { name: "Fin", value: dist.fin },
+                          { name: "CV", value: dist.costos },
+                        ]}
+                        cx="50%"
+                        cy="100%"
+                        startAngle={180}
+                        endAngle={0}
+                        innerRadius={30}
+                        outerRadius={50}
+                        dataKey="value"
+                        stroke="none"
+                      >
+                        <Cell fill={C.blue} />
+                        <Cell fill={C.indigo} />
+                        <Cell fill={C.negative} />
+                        <Cell fill={C.warning} />
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
 
               {/* Top cuentas */}
@@ -672,6 +715,9 @@ export default function Dashboard() {
                   border: `0.5px solid ${C.cardBorder}`,
                   borderRadius: 8,
                   padding: 12,
+                  height: "100%",
+                  display: "flex",
+                  flexDirection: "column",
                 }}
               >
                 <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Top cuentas de ingreso</div>
@@ -683,7 +729,7 @@ export default function Dashboard() {
                       key={i}
                       style={{
                         display: "grid",
-                        gridTemplateColumns: "1fr auto auto",
+                        gridTemplateColumns: "1.4fr 1fr auto auto",
                         gap: 8,
                         alignItems: "center",
                         padding: "8px 0",
@@ -701,6 +747,16 @@ export default function Dashboard() {
                       >
                         {r.nombre}
                       </span>
+                      <div style={{ height: 4, background: "#0d1525", borderRadius: 2, overflow: "hidden" }}>
+                        <div
+                          style={{
+                            width: `${Math.min(100, Math.max(0, r.part))}%`,
+                            height: "100%",
+                            background: C.blue,
+                            borderRadius: 2,
+                          }}
+                        />
+                      </div>
                       <span style={{ color: C.textPrimary, fontVariantNumeric: "tabular-nums" }}>
                         {formatM(r.total)}
                       </span>
