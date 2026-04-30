@@ -174,8 +174,8 @@ function HeroCard({
       </div>
       <div
         style={{
-            fontSize: 28,
-            fontWeight: 600,
+            fontSize: 32,
+            fontWeight: 700,
             lineHeight: 1,
           color: valueColor ?? C.textPrimary,
           fontVariantNumeric: "tabular-nums",
@@ -230,8 +230,8 @@ function RatioCard({
       </div>
       <div
         style={{
-          fontSize: 20,
-          fontWeight: 600,
+          fontSize: 22,
+          fontWeight: 700,
           color: valueColor ?? C.textPrimary,
           fontVariantNumeric: "tabular-nums",
           marginTop: 4,
@@ -505,8 +505,8 @@ export default function Dashboard() {
                     </span>
                   </div>
                 </div>
-                <div style={{ height: 180 }}>
-                <ResponsiveContainer width="100%" height={180}>
+                <div style={{ height: 160 }}>
+                <ResponsiveContainer width="100%" height={160}>
                   <ComposedChart data={clampedChartData} margin={{ top: 6, right: 6, left: -8, bottom: 0 }}>
                     <defs>
                       <linearGradient id="gradIngresos" x1="0" y1="0" x2="0" y2="1">
