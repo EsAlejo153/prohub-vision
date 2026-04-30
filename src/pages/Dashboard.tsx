@@ -679,33 +679,6 @@ export default function Dashboard() {
                   <DistRow label="G. Financieros" pct={dist.fin} color={C.negative} />
                   <DistRow label="Costos de venta" pct={dist.costos} color={C.warning} />
                 </div>
-                <div style={{ height: 80, marginTop: 4 }}>
-                  <ResponsiveContainer width="100%" height={80}>
-                    <PieChart>
-                      <Pie
-                        data={[
-                          { name: "Adm", value: dist.adm },
-                          { name: "Oper", value: dist.oper },
-                          { name: "Fin", value: dist.fin },
-                          { name: "CV", value: dist.costos },
-                        ]}
-                        cx="50%"
-                        cy="100%"
-                        startAngle={180}
-                        endAngle={0}
-                        innerRadius={30}
-                        outerRadius={50}
-                        dataKey="value"
-                        stroke="none"
-                      >
-                        <Cell fill={C.blue} />
-                        <Cell fill={C.indigo} />
-                        <Cell fill={C.negative} />
-                        <Cell fill={C.warning} />
-                      </Pie>
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
               </div>
 
               {/* Top cuentas */}
