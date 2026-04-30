@@ -346,6 +346,16 @@ export default function Dashboard() {
   const roe = last?.roe_pct ?? 0;
   const endeudamiento = last?.endeudamiento_pct ?? 0;
   const autonomia = last?.autonomia_pct ?? 0;
+  const roa = last?.roa_pct ?? 0;
+
+  const clampedChartData = useMemo(
+    () =>
+      chartData.map((d) => ({
+        ...d,
+        margen_operacional_pct: Math.max(-100, Math.min(100, d.margen_operacional_pct)),
+      })),
+    [chartData]
+  );
 
   const prev = rows.length >= 2 ? rows[rows.length - 2] : null;
   const dPct = (curr: number, prv: number | undefined) =>
@@ -358,11 +368,11 @@ export default function Dashboard() {
           background: C.pageBg,
           margin: -24,
           padding: 16,
-          display: "flex",
-          flexDirection: "column",
-          gap: 12,
+          display: "grid",
+          gridTemplateRows: "auto auto auto 1fr",
+          gap: 8,
           height: "calc(100vh - 56px)",
-          overflowY: "auto",
+          overflow: "hidden",
         }}
       >
         {isLoading ? (
@@ -480,9 +490,9 @@ export default function Dashboard() {
                     </span>
                   </div>
                 </div>
-                <div style={{ flex: "1 1 auto", minHeight: 200 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={chartData} margin={{ top: 6, right: 6, left: -8, bottom: 0 }}>
+                <div style={{ height: 160 }}>
+                <ResponsiveContainer width="100%" height={160}>
+                  <ComposedChart data={clampedChartData} margin={{ top: 6, right: 6, left: -8, bottom: 0 }}>
                     <defs>
                       <linearGradient id="gradIngresos" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="5%" stopColor={C.blue} stopOpacity={0.3} />
@@ -501,6 +511,7 @@ export default function Dashboard() {
                     <YAxis
                       yAxisId="right"
                       orientation="right"
+                      domain={[-100, 100]}
                       tick={{ fontSize: 9, fill: C.textDim }}
                       axisLine={false}
                       tickLine={false}
