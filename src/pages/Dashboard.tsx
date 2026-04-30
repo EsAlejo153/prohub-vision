@@ -618,7 +618,7 @@ export default function Dashboard() {
             </div>
 
             {/* ROW 4 — Bottom panels */}
-            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", flex: "0 0 200px", marginBottom: 0 }}>
+            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", flex: "0 0 220px", marginBottom: 0, alignItems: "stretch" }}>
               {/* Mini area chart */}
               <div
                 style={{
@@ -666,13 +666,45 @@ export default function Dashboard() {
                   border: `0.5px solid ${C.cardBorder}`,
                   borderRadius: 8,
                   padding: 14,
+                  height: "100%",
+                  display: "flex",
+                  flexDirection: "column",
                 }}
               >
                 <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Distribución de gastos</div>
-                <DistRow label="G. Administración" pct={dist.adm} color={C.blue} />
-                <DistRow label="G. Operacionales" pct={dist.oper} color={C.indigo} />
-                <DistRow label="G. Financieros" pct={dist.fin} color={C.negative} />
-                <DistRow label="Costos de venta" pct={dist.costos} color={C.warning} />
+                <div style={{ flex: "1 1 auto" }}>
+                  <DistRow label="G. Administración" pct={dist.adm} color={C.blue} />
+                  <DistRow label="G. Operacionales" pct={dist.oper} color={C.indigo} />
+                  <DistRow label="G. Financieros" pct={dist.fin} color={C.negative} />
+                  <DistRow label="Costos de venta" pct={dist.costos} color={C.warning} />
+                </div>
+                <div style={{ height: 80, marginTop: 4 }}>
+                  <ResponsiveContainer width="100%" height={80}>
+                    <PieChart>
+                      <Pie
+                        data={[
+                          { name: "Adm", value: dist.adm },
+                          { name: "Oper", value: dist.oper },
+                          { name: "Fin", value: dist.fin },
+                          { name: "CV", value: dist.costos },
+                        ]}
+                        cx="50%"
+                        cy="100%"
+                        startAngle={180}
+                        endAngle={0}
+                        innerRadius={30}
+                        outerRadius={50}
+                        dataKey="value"
+                        stroke="none"
+                      >
+                        <Cell fill={C.blue} />
+                        <Cell fill={C.indigo} />
+                        <Cell fill={C.negative} />
+                        <Cell fill={C.warning} />
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
 
               {/* Top cuentas */}
@@ -682,6 +714,9 @@ export default function Dashboard() {
                   border: `0.5px solid ${C.cardBorder}`,
                   borderRadius: 8,
                   padding: 12,
+                  height: "100%",
+                  display: "flex",
+                  flexDirection: "column",
                 }}
               >
                 <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Top cuentas de ingreso</div>
@@ -693,7 +728,7 @@ export default function Dashboard() {
                       key={i}
                       style={{
                         display: "grid",
-                        gridTemplateColumns: "1fr auto auto",
+                        gridTemplateColumns: "1.4fr 1fr auto auto",
                         gap: 8,
                         alignItems: "center",
                         padding: "8px 0",
@@ -711,6 +746,16 @@ export default function Dashboard() {
                       >
                         {r.nombre}
                       </span>
+                      <div style={{ height: 4, background: "#0d1525", borderRadius: 2, overflow: "hidden" }}>
+                        <div
+                          style={{
+                            width: `${Math.min(100, Math.max(0, r.part))}%`,
+                            height: "100%",
+                            background: C.blue,
+                            borderRadius: 2,
+                          }}
+                        />
+                      </div>
                       <span style={{ color: C.textPrimary, fontVariantNumeric: "tabular-nums" }}>
                         {formatM(r.total)}
                       </span>
