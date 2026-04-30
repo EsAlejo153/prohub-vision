@@ -343,10 +343,20 @@ export default function Dashboard() {
   const margenBruto = last?.margen_bruto_pct ?? 0;
   const margenNeto = last?.margen_neto_pct ?? 0;
   const costoIngreso = last?.costo_ingreso_pct ?? 0;
-  const roe = last?.roe_pct ?? 0;
-  const endeudamiento = last?.endeudamiento_pct ?? 0;
-  const autonomia = last?.autonomia_pct ?? 0;
-  const roa = last?.roa_pct ?? 0;
+  // Derive from balance directly (avoids $0 from view)
+  const safeDiv = (a: number, b: number) => (b === 0 ? 0 : (a / b) * 100);
+  const endeudamiento = balance.activos !== 0
+    ? safeDiv(Math.abs(balance.pasivos), Math.abs(balance.activos))
+    : last?.endeudamiento_pct ?? 0;
+  const autonomia = balance.activos !== 0
+    ? safeDiv(balance.patrimonio, Math.abs(balance.activos))
+    : last?.autonomia_pct ?? 0;
+  const roe = balance.patrimonio !== 0
+    ? safeDiv(totals.utilNeta, Math.abs(balance.patrimonio))
+    : last?.roe_pct ?? 0;
+  const roa = balance.activos !== 0
+    ? safeDiv(totals.utilNeta, Math.abs(balance.activos))
+    : last?.roa_pct ?? 0;
 
   const clampedChartData = useMemo(
     () =>
