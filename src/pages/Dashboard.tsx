@@ -282,12 +282,9 @@ export default function Dashboard() {
     };
   }, [rows]);
 
-  // Balance fallback if zero
-  const balanceZero =
-    !isLoading && rows.length > 0 && totals.activos === 0 && totals.pasivos === 0 && totals.patrimonio === 0;
-  const { data: balFallback } = useBalanceFallback(filtros, balanceZero);
-
-  const balance = balanceZero && balFallback
+  // Always query movimientos directly for balance (more reliable than view aggregates)
+  const { data: balFallback } = useBalanceFallback(filtros, true);
+  const balance = balFallback && (balFallback.activos !== 0 || balFallback.pasivos !== 0 || balFallback.patrimonio !== 0)
     ? balFallback
     : { activos: totals.activos, pasivos: totals.pasivos, patrimonio: totals.patrimonio };
 
