@@ -174,8 +174,8 @@ function HeroCard({
       </div>
       <div
         style={{
-            fontSize: 28,
-            fontWeight: 600,
+            fontSize: 32,
+            fontWeight: 700,
             lineHeight: 1,
           color: valueColor ?? C.textPrimary,
           fontVariantNumeric: "tabular-nums",
@@ -230,8 +230,8 @@ function RatioCard({
       </div>
       <div
         style={{
-          fontSize: 20,
-          fontWeight: 600,
+          fontSize: 22,
+          fontWeight: 700,
           color: valueColor ?? C.textPrimary,
           fontVariantNumeric: "tabular-nums",
           marginTop: 4,
@@ -491,7 +491,7 @@ export default function Dashboard() {
                 }}
               >
                 <div className="flex items-center justify-between mb-2">
-                  <div style={{ fontSize: 10, color: C.textMuted }}>
+                  <div style={{ fontSize: 12, color: C.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>
                     Ingresos vs Margen operacional — por mes
                   </div>
                   <div className="flex items-center gap-3" style={{ fontSize: 10, color: C.textMuted }}>
@@ -505,8 +505,8 @@ export default function Dashboard() {
                     </span>
                   </div>
                 </div>
-                <div style={{ height: 180 }}>
-                <ResponsiveContainer width="100%" height={180}>
+                <div style={{ height: 160 }}>
+                <ResponsiveContainer width="100%" height={160}>
                   <ComposedChart data={clampedChartData} margin={{ top: 6, right: 6, left: -8, bottom: 0 }}>
                     <defs>
                       <linearGradient id="gradIngresos" x1="0" y1="0" x2="0" y2="1">
@@ -580,7 +580,7 @@ export default function Dashboard() {
                     flex: "1 1 auto",
                   }}
                 >
-                  <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Balance general</div>
+                  <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Balance general</div>
                   <BalanceRow
                     label="Activos"
                     value={formatM(balance.activos)}
@@ -611,7 +611,7 @@ export default function Dashboard() {
                     flex: "1 1 auto",
                   }}
                 >
-                  <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Ratios de solvencia</div>
+                  <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Ratios de solvencia</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                     <GaugeCard label="Endeudamiento" value={endeudamiento} unit="%" min={0} max={200} threshold={100} colorOk={C.positive} colorBad={C.negative} />
                     <GaugeCard label="Autonomía" value={autonomia} unit="%" min={-100} max={100} threshold={0} colorOk={C.positive} colorBad={C.negative} invert />
@@ -636,8 +636,8 @@ export default function Dashboard() {
                   height: "100%",
                 }}
               >
-                <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8, fontWeight: 500 }}>Ingresos por mes</div>
-                <div style={{ flex: 1, minHeight: 100 }}>
+                <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Ingresos por mes</div>
+                <div style={{ flex: 1, minHeight: 120 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chartData} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
                     <defs>
@@ -677,7 +677,7 @@ export default function Dashboard() {
                   flexDirection: "column",
                 }}
               >
-                <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8, fontWeight: 500 }}>Distribución de gastos</div>
+                <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Distribución de gastos</div>
                 <div style={{ flex: "1 1 auto" }}>
                   <DistRow label="G. Administración" pct={dist.adm} color={C.blue} />
                   <DistRow label="G. Operacionales" pct={dist.oper} color={C.indigo} />
@@ -701,7 +701,7 @@ export default function Dashboard() {
                   flexDirection: "column",
                 }}
               >
-                <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8, fontWeight: 500 }}>Top cuentas de ingreso</div>
+                <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Top cuentas de ingreso</div>
                 {topAgg.length === 0 ? (
                   <div style={{ fontSize: 10, color: C.textDim, padding: "8px 0" }}>Sin datos</div>
                 ) : (
@@ -713,7 +713,7 @@ export default function Dashboard() {
                         gridTemplateColumns: "1.4fr 1fr auto auto",
                         gap: 8,
                         alignItems: "center",
-                        padding: "6px 0",
+                        padding: "8px 0",
                         borderBottom: i < topAgg.length - 1 ? `0.5px solid #0d1525` : "none",
                         fontSize: 11,
                       }}
@@ -842,7 +842,7 @@ function DistRow({ label, pct, color }: { label: string; pct: number; color: str
       <div
         style={{
           marginTop: 4,
-          height: 6,
+          height: 8,
           background: C.cardBorder,
           borderRadius: 2,
           overflow: "hidden",
@@ -920,7 +920,7 @@ function GaugeCard({
         justifyContent: "space-between",
       }}
     >
-      <svg width="80" height="48" viewBox="0 0 80 48" style={{ display: "block", margin: "0 auto" }}>
+      <svg width="90" height="52" viewBox="0 0 80 48" style={{ display: "block", margin: "0 auto" }}>
         <path
           d={`M ${cx - r},${cy} A ${r},${r} 0 0,1 ${cx + r},${cy}`}
           fill="none"
@@ -945,8 +945,8 @@ function GaugeCard({
       </svg>
       <div
         style={{
-          fontSize: 16,
-          fontWeight: 600,
+          fontSize: 18,
+          fontWeight: 700,
           color,
           marginTop: 2,
           fontVariantNumeric: "tabular-nums",
