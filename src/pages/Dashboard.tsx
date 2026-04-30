@@ -894,7 +894,7 @@ function GaugeCard({
         />
         <circle
           cx={cx + r * Math.cos((angle * Math.PI) / 180)}
-          cy={cy + r * Math.sin((angle * Math.PI) / 180)}
+          cy={cy - r * Math.sin((angle * Math.PI) / 180)}
           r={3}
           fill={color}
         />
