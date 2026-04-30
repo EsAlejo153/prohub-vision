@@ -623,7 +623,7 @@ export default function Dashboard() {
             </div>
 
             {/* ROW 4 — Bottom panels */}
-            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", flex: "0 0 220px", marginBottom: 0, alignItems: "stretch" }}>
+            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", flex: "0 0 240px", marginBottom: 0, alignItems: "stretch" }}>
               {/* Mini area chart */}
               <div
                 style={{
