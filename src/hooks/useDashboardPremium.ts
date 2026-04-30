@@ -45,10 +45,13 @@ export interface TopCuentaRow {
   compania: string;
   año_mes_num: number;
   ranking: number;
-  cuenta_codigo: string;
-  cuenta_nombre: string;
-  valor: number;
-  participacion_pct: number;
+  cuenta_key?: string;
+  cuenta_codigo?: string;
+  nombre_cuenta?: string;
+  cuenta_nombre?: string;
+  total?: number;
+  valor?: number;
+  participacion_pct?: number;
 }
 
 const MES_LABELS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
