@@ -1,6 +1,7 @@
 import { NavLink, Link } from "react-router-dom";
 import { BarChart3, TrendingUp, Scale, Upload, Settings, LogOut } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { useAlertaCuentas } from "@/hooks/useClasificacion";
 
 const main = [
   { to: "/dashboard", label: "Dashboard Financiero", icon: BarChart3 },
@@ -9,12 +10,14 @@ const main = [
 ];
 const analisis = [
   { to: "/cargue", label: "Cargue de Datos", icon: Upload },
-  { to: "/configuracion", label: "Configuración", icon: Settings },
+  { to: "/configuracion", label: "Configuración", icon: Settings, showBadge: true },
 ];
 
 export default function Sidebar() {
   const { user, signOut } = useAuth();
   const initial = user?.email?.[0]?.toUpperCase() ?? "?";
+  const { data: alerta } = useAlertaCuentas();
+  const pendientes = alerta?.pendientes_eri ?? 0;
 
   return (
     <aside
@@ -37,7 +40,15 @@ export default function Sidebar() {
         <div className="mt-6">
           <SectionLabel>Análisis</SectionLabel>
           <div className="mt-1 space-y-0.5">
-            {analisis.map((it) => <NavItem key={it.to} {...it} />)}
+            {analisis.map((it) => (
+              <NavItem
+                key={it.to}
+                to={it.to}
+                label={it.label}
+                icon={it.icon}
+                badge={it.showBadge && pendientes > 0 ? pendientes : undefined}
+              />
+            ))}
           </div>
         </div>
       </nav>
@@ -74,7 +85,17 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-function NavItem({ to, label, icon: Icon }: { to: string; label: string; icon: React.ComponentType<{ className?: string }> }) {
+function NavItem({
+  to,
+  label,
+  icon: Icon,
+  badge,
+}: {
+  to: string;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  badge?: number;
+}) {
   return (
     <NavLink
       to={to}
@@ -88,6 +109,11 @@ function NavItem({ to, label, icon: Icon }: { to: string; label: string; icon: R
     >
       <Icon className="h-4 w-4 shrink-0" />
       <span className="truncate">{label}</span>
+      {badge !== undefined && badge > 0 && (
+        <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-bold text-destructive-foreground">
+          {badge}
+        </span>
+      )}
     </NavLink>
   );
 }
