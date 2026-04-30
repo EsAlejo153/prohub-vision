@@ -27,7 +27,7 @@ export function usePerfil(userId: string | undefined) {
 }
 
 export interface HistorialCargue {
-  archivo_id: string;
+  id: string;
   nombre_archivo: string;
   compania: string | null;
   periodo: string | null;
