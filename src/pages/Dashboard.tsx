@@ -580,7 +580,7 @@ export default function Dashboard() {
                     flex: "1 1 auto",
                   }}
                 >
-                  <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Balance general</div>
+                  <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Balance general</div>
                   <BalanceRow
                     label="Activos"
                     value={formatM(balance.activos)}
@@ -611,7 +611,7 @@ export default function Dashboard() {
                     flex: "1 1 auto",
                   }}
                 >
-                  <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 8 }}>Ratios de solvencia</div>
+                  <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Ratios de solvencia</div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                     <GaugeCard label="Endeudamiento" value={endeudamiento} unit="%" min={0} max={200} threshold={100} colorOk={C.positive} colorBad={C.negative} />
                     <GaugeCard label="Autonomía" value={autonomia} unit="%" min={-100} max={100} threshold={0} colorOk={C.positive} colorBad={C.negative} invert />
@@ -636,8 +636,8 @@ export default function Dashboard() {
                   height: "100%",
                 }}
               >
-                <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8, fontWeight: 500 }}>Ingresos por mes</div>
-                <div style={{ flex: 1, minHeight: 100 }}>
+                <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Ingresos por mes</div>
+                <div style={{ flex: 1, minHeight: 120 }}>
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={chartData} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
                     <defs>
@@ -677,7 +677,7 @@ export default function Dashboard() {
                   flexDirection: "column",
                 }}
               >
-                <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8, fontWeight: 500 }}>Distribución de gastos</div>
+                <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Distribución de gastos</div>
                 <div style={{ flex: "1 1 auto" }}>
                   <DistRow label="G. Administración" pct={dist.adm} color={C.blue} />
                   <DistRow label="G. Operacionales" pct={dist.oper} color={C.indigo} />
@@ -701,7 +701,7 @@ export default function Dashboard() {
                   flexDirection: "column",
                 }}
               >
-                <div style={{ fontSize: 11, color: C.textMuted, marginBottom: 8, fontWeight: 500 }}>Top cuentas de ingreso</div>
+                <div style={{ fontSize: 12, color: C.textMuted, marginBottom: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>Top cuentas de ingreso</div>
                 {topAgg.length === 0 ? (
                   <div style={{ fontSize: 10, color: C.textDim, padding: "8px 0" }}>Sin datos</div>
                 ) : (
@@ -713,7 +713,7 @@ export default function Dashboard() {
                         gridTemplateColumns: "1.4fr 1fr auto auto",
                         gap: 8,
                         alignItems: "center",
-                        padding: "6px 0",
+                        padding: "8px 0",
                         borderBottom: i < topAgg.length - 1 ? `0.5px solid #0d1525` : "none",
                         fontSize: 11,
                       }}
