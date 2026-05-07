@@ -537,6 +537,9 @@ function TabMesAMes({ plan, filtros }: TabProps) {
               {planRows.map((row, idx) => {
                 const total = getTotal(row.orden);
                 const monthVals = getMonthVals(row.orden);
+                if (row.nivel === "Cuenta" && total === 0 && monthVals.every((v) => v === 0)) {
+                  return null;
+                }
                 const { rowStyle, rowClass, isTitulo } = rowStyling(row.nivel, total, idx);
                 const isCuenta = row.nivel === "Cuenta";
                 const isOpen = openRows.has(row.orden);
