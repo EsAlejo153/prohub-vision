@@ -327,6 +327,22 @@ function TabPorCC({ plan, filtros }: TabProps) {
   const [openN1, setOpenN1] = useState<Set<string>>(new Set());
   const [openN2, setOpenN2] = useState<Set<string>>(new Set());
   const [openN3, setOpenN3] = useState<Set<string>>(new Set());
+  const [openIngreso, setOpenIngreso] = useState<Set<number>>(new Set());
+  const toggleIngreso = (orden: number) =>
+    setOpenIngreso(prev => { const s = new Set(prev); s.has(orden) ? s.delete(orden) : s.add(orden); return s; });
+
+  const ingresoTercerosMap = useMemo(() => {
+    const map = new Map<number, Map<string, Map<string, number>>>();
+    for (const r of eriCC.data ?? []) {
+      if (!map.has(r.orden)) map.set(r.orden, new Map());
+      const ccMap = map.get(r.orden)!;
+      if (!ccMap.has(r.cc_key)) ccMap.set(r.cc_key, new Map());
+      const nombre = (r as any).concepto?.replace(/\d+$/, '').trim() || 'Sin detalle';
+      const tercMap = ccMap.get(r.cc_key)!;
+      tercMap.set(nombre, (tercMap.get(nombre) ?? 0) + (Number(r.valor_pyg) || 0));
+    }
+    return map;
+  }, [eriCC.data]);
 
   const toggle = (setter: React.Dispatch<React.SetStateAction<Set<string>>>) => (k: string) =>
     setter((prev) => {
@@ -361,8 +377,20 @@ function TabPorCC({ plan, filtros }: TabProps) {
     (r) => r.nivel === "Cuenta" && (r as any).clase_cod === "6"
   );
 
-  const vTotalIngresos = getCCVals(15);
-  const vTotalCostos = getCCVals(19);
+  const vTotalIngresos: ValoresPorCC = {};
+  for (const row of ingresosCuentas) {
+    const v = getCCVals(row.orden);
+    for (const cc of CC_KEYS) {
+      vTotalIngresos[cc.key] = (vTotalIngresos[cc.key] ?? 0) + (v[cc.key] ?? 0);
+    }
+  }
+  const vTotalCostos: ValoresPorCC = {};
+  for (const row of costosCuentas) {
+    const v = getCCVals(row.orden);
+    for (const cc of CC_KEYS) {
+      vTotalCostos[cc.key] = (vTotalCostos[cc.key] ?? 0) + (v[cc.key] ?? 0);
+    }
+  }
 
   const vUtilidadBruta: ValoresPorCC = {};
   for (const cc of CC_KEYS) {
@@ -378,17 +406,12 @@ function TabPorCC({ plan, filtros }: TabProps) {
     vUtilidadOper[cc.key] = (vUtilidadBruta[cc.key] ?? 0) - (vGastosOper[cc.key] ?? 0);
   }
 
-  const vOtrosIngresos = getCCVals(37);
-  // override: aggregate from otrosIngresosCuentas
-  {
-    const agg: ValoresPorCC = {};
-    for (const row of otrosIngresosCuentas) {
-      const vals = getCCVals(row.orden);
-      for (const cc of CC_KEYS) {
-        agg[cc.key] = (agg[cc.key] ?? 0) + (vals[cc.key] ?? 0);
-      }
+  const vOtrosIngresos: ValoresPorCC = {};
+  for (const row of otrosIngresosCuentas) {
+    const v = getCCVals(row.orden);
+    for (const cc of CC_KEYS) {
+      vOtrosIngresos[cc.key] = (vOtrosIngresos[cc.key] ?? 0) + (v[cc.key] ?? 0);
     }
-    for (const cc of CC_KEYS) vOtrosIngresos[cc.key] = agg[cc.key] ?? 0;
   }
   const vOtrosGastos = gastosNoOperTree?.valores ?? {};
 
@@ -423,11 +446,15 @@ function TabPorCC({ plan, filtros }: TabProps) {
     );
   };
   const totalIngresos = getConsolidado(vTotalIngresos) || 1;
-  const renderPctCell = (vals: ValoresPorCC) => {
+  const renderPctCell = (vals: ValoresPorCC, bold = false) => {
     const v = getConsolidado(vals);
-    if (!v) return <td className="px-2 py-1.5 text-right text-[10px] text-muted-foreground/30">-</td>;
+    if (!v) return <td className="px-2 py-1.5 text-right text-[10px] text-muted-foreground/30 whitespace-nowrap min-w-[70px]">-</td>;
     const pct = (v / totalIngresos) * 100;
-    return <td className="px-2 py-1.5 text-right text-[10px] tabular-nums text-muted-foreground whitespace-nowrap">{pct.toFixed(1)}%</td>;
+    return (
+      <td className={`px-2 py-1.5 text-right text-[10px] tabular-nums whitespace-nowrap min-w-[70px] ${bold ? 'font-bold text-primary' : 'text-muted-foreground'}`}>
+        {pct.toFixed(2)}%
+      </td>
+    );
   };
 
   const SectionHeader = ({ label }: { label: string }) => (
@@ -440,15 +467,53 @@ function TabPorCC({ plan, filtros }: TabProps) {
 
   const EriCuentaRow = ({ row, idx }: { row: PlanPygRow; idx: number }) => {
     const vals = getCCVals(row.orden);
-    const allZero = CC_KEYS.every(cc => (vals[cc.key] ?? 0) === 0) && getConsolidado(vals) === 0;
+    const consVal = getConsolidado(vals);
+    const allZero = CC_KEYS.every(cc => (vals[cc.key] ?? 0) === 0) && consVal === 0;
     if (allZero) return null;
+    const isOpen = openIngreso.has(row.orden);
+    const ccTercMap = ingresoTercerosMap.get(row.orden);
     return (
-      <tr className={`border-b border-border/20 ${idx % 2 === 0 ? "bg-background/10" : ""}`}>
-        <td className="px-3 py-1 pl-8 text-[11px] text-muted-foreground">{row.etiqueta_fila || row.concepto}</td>
-        {CC_KEYS.map((cc) => renderCellVal(vals, cc))}
-        {renderConsCell(vals)}
-        {renderPctCell(vals)}
-      </tr>
+      <Fragment key={row.orden}>
+        <tr
+          className={`border-b border-border/20 cursor-pointer hover:opacity-90 ${idx % 2 === 0 ? "bg-background/10" : ""}`}
+          onClick={() => toggleIngreso(row.orden)}
+        >
+          <td className="px-3 py-1 pl-8 text-[11px] text-muted-foreground">
+            <span className="mr-2 text-[10px] text-muted-foreground/50">{isOpen ? "▾" : "▸"}</span>
+            {row.etiqueta_fila || row.concepto}
+          </td>
+          {CC_KEYS.map((cc) => renderCellVal(vals, cc))}
+          {renderConsCell(vals)}
+          {renderPctCell(vals)}
+        </tr>
+        {isOpen && CC_KEYS.map(cc => {
+          const tercMap = ccTercMap?.get(cc.key);
+          if (!tercMap) return null;
+          return Array.from(tercMap.entries())
+            .filter(([, v]) => v !== 0)
+            .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+            .map(([nombre, val], ti) => {
+              const f = formatCell(val);
+              return (
+                <tr key={`${row.orden}||${cc.key}||${ti}`}
+                    className="border-b border-border/10"
+                    style={{ background: "#080c18" }}>
+                  <td className="px-3 py-0.5 pl-16 text-[10px] text-muted-foreground/60">
+                    <span className="mr-2 text-[9px] bg-muted/40 px-1 rounded font-mono">{cc.key}</span>
+                    {nombre}
+                  </td>
+                  {CC_KEYS.map(c => {
+                    const v = c.key === cc.key ? val : 0;
+                    const fv = formatCell(v);
+                    return <td key={c.key} className={`px-2 py-0.5 text-right text-[10px] tabular-nums whitespace-nowrap min-w-[110px] ${fv.zero ? 'text-muted-foreground/20' : fv.negative ? 'text-destructive' : 'text-muted-foreground/60'}`}>{fv.text}</td>;
+                  })}
+                  <td className={`px-2 py-0.5 text-right text-[10px] tabular-nums whitespace-nowrap min-w-[110px] ${f.negative ? 'text-destructive' : 'text-muted-foreground/60'}`}>{f.text}</td>
+                  <td className="px-2 py-0.5 text-right text-[10px] text-muted-foreground/30">-</td>
+                </tr>
+              );
+            });
+        })}
+      </Fragment>
     );
   };
 
@@ -457,7 +522,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
       <td className="px-3 py-1.5 text-[11px] font-bold text-foreground">{label}</td>
       {CC_KEYS.map((cc) => renderCellVal(vals, cc, true))}
       {renderConsCell(vals, true)}
-      {renderPctCell(vals)}
+      {renderPctCell(vals, true)}
     </tr>
   );
 
@@ -466,7 +531,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
       <td className="px-3 py-2 text-[12px] font-bold text-foreground">{label}</td>
       {CC_KEYS.map((cc) => renderCellVal(vals, cc, true))}
       {renderConsCell(vals, true)}
-      {renderPctCell(vals)}
+      {renderPctCell(vals, true)}
     </tr>
   );
 
@@ -486,7 +551,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
           </td>
           {CC_KEYS.map((cc) => renderCellVal(n1.valores, cc, true))}
           {renderConsCell(n1.valores, true)}
-          {renderPctCell(n1.valores)}
+          {renderPctCell(n1.valores, true)}
         </tr>
         {isOpen1 && n1.detalles.map((n2) => {
           const k2 = `${k1}||${n2.detalle_gasto}`;
