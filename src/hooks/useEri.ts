@@ -9,6 +9,8 @@ export interface PlanPygRow {
   nivel: string;
   grupo_titulo: string;
   etiqueta_fila: string;
+  clase_cod?: string | null;
+  grupo_cod?: string | null;
 }
 
 export interface EriValueRow {
@@ -29,7 +31,7 @@ export function usePlanPyg() {
     queryFn: async (): Promise<PlanPygRow[]> => {
       const { data, error } = await supabase
         .from("plan_pyg")
-        .select("orden, concepto, nivel, grupo_titulo, etiqueta_fila")
+        .select("*")
         .order("orden", { ascending: true });
       if (error) throw error;
       return (data ?? []) as PlanPygRow[];
