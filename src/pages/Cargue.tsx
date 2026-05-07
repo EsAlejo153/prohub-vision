@@ -130,7 +130,7 @@ export default function Cargue() {
           const { data, error } = await supabase
             .from("movimientos")
             .upsert(chunk, {
-              onConflict: "compania,cuenta_key,fecha_key,comprobante,debito,credito",
+              onConflict: "compania,cuenta_key,fecha_key,cc_key,comprobante,debito,credito,concepto",
               ignoreDuplicates: true,
             })
             .select("id");
