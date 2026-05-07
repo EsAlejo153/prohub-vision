@@ -52,3 +52,65 @@ export function useEri(filtros: FiltroDashboard) {
     },
   });
 }
+
+export interface EriCompactRow {
+  orden: number;
+  año_mes_num: number;
+  cc_key: string;
+  compania: string;
+  valor_pyg: number;
+}
+
+export function useEriAllMonths(filtros: {
+  año: number | "Todas";
+  compania: string;
+  ccKey: string;
+}) {
+  return useQuery({
+    queryKey: ["eri-all-months", filtros],
+    queryFn: async (): Promise<EriCompactRow[]> => {
+      let q = supabase
+        .from("v_eri_por_mes")
+        .select("orden,año_mes_num,cc_key,compania,valor_pyg");
+      if (filtros.año !== "Todas") {
+        q = q
+          .gte("año_mes_num", filtros.año * 100 + 1)
+          .lte("año_mes_num", filtros.año * 100 + 12);
+      }
+      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+      if (filtros.ccKey !== "TODOS") q = q.eq("cc_key", filtros.ccKey);
+      const { data, error } = await q
+        .order("orden", { ascending: true })
+        .order("año_mes_num", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as EriCompactRow[];
+    },
+  });
+}
+
+export function useEriAllCC(filtros: {
+  año: number | "Todas";
+  compania: string;
+  mes: number | "Todos";
+}) {
+  return useQuery({
+    queryKey: ["eri-all-cc", filtros],
+    queryFn: async (): Promise<EriCompactRow[]> => {
+      let q = supabase
+        .from("v_eri_por_mes")
+        .select("orden,año_mes_num,cc_key,compania,valor_pyg");
+      if (filtros.año !== "Todas") {
+        q = q
+          .gte("año_mes_num", filtros.año * 100 + 1)
+          .lte("año_mes_num", filtros.año * 100 + 12);
+      }
+      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+      if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
+      const { data, error } = await q
+        .order("orden", { ascending: true })
+        .order("cc_key", { ascending: true });
+      if (error) throw error;
+      return (data ?? []) as EriCompactRow[];
+    },
+  });
+}
