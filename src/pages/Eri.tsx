@@ -365,7 +365,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
 
   const vUtilidadBruta: ValoresPorCC = {};
   for (const cc of CC_KEYS) {
-    vUtilidadBruta[cc.key] = (vTotalIngresos[cc.key] ?? 0) - Math.abs(vTotalCostos[cc.key] ?? 0);
+    vUtilidadBruta[cc.key] = (vTotalIngresos[cc.key] ?? 0) + (vTotalCostos[cc.key] ?? 0);
   }
 
   const gastosOperTree = tree.find((n) => n.tipo_gasto === "01.GASTOS OPERACIONALES");
