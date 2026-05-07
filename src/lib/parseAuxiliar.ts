@@ -31,6 +31,7 @@ export interface ParsedRow {
   cuenta_key?: string;
   clase_cod?: string;
   tercero_key?: string;
+  nombre_tercero?: string; // ← AGREGADO
   cc_key?: string;
   mov_neto?: number;
   nombre_cuenta?: string;
@@ -67,14 +68,12 @@ function parseExcelDate(v: unknown): Date | null {
   if (v == null || v === "") return null;
   if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
   if (typeof v === "number") {
-    // Excel serial date
     const d = XLSX.SSF.parse_date_code(v);
     if (!d) return null;
     return new Date(Date.UTC(d.y, d.m - 1, d.d));
   }
   if (typeof v === "string") {
     const s = v.trim();
-    // dd/mm/yyyy or dd-mm-yyyy
     const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
     if (m) {
       let [, dd, mm, yy] = m;
@@ -95,7 +94,10 @@ function toNumber(v: unknown): number {
   if (v == null || v === "") return 0;
   if (typeof v === "number") return Number.isFinite(v) ? v : 0;
   if (typeof v === "string") {
-    const cleaned = v.replace(/\./g, "").replace(/,/g, ".").replace(/[^\d.\-]/g, "");
+    const cleaned = v
+      .replace(/\./g, "")
+      .replace(/,/g, ".")
+      .replace(/[^\d.\-]/g, "");
     const n = Number(cleaned);
     return Number.isFinite(n) ? n : NaN;
   }
@@ -106,16 +108,7 @@ export function validateAndCompute(raw: RawRow): ParsedRow {
   const errors: string[] = [];
   const fieldErrors: Partial<Record<ErrorField, string>> = {};
 
-  // Detect fully empty row
-  const allValues = Object.values(raw);
-  const rowEmpty = allValues.every(
-    (v) => v == null || (typeof v === "string" && v.trim() === "") || v === 0,
-  );
-  // Treat as empty only when key fields are blank
-  const keyBlank =
-    !String(raw.Compañia ?? "").trim() &&
-    !String(raw.Cuenta ?? "").trim() &&
-    !raw.Fecha;
+  const keyBlank = !String(raw.Compañia ?? "").trim() && !String(raw.Cuenta ?? "").trim() && !raw.Fecha;
   if (keyBlank) {
     errors.push("Fila vacía");
     fieldErrors.__row__ = "Fila vacía";
@@ -173,6 +166,7 @@ export function validateAndCompute(raw: RawRow): ParsedRow {
   const ccRaw = String(raw["Centro Costos"] ?? "").trim();
   const cc_key = ccRaw || "SIN CC";
   const tercero_key = String(raw["Cédula / NIT"] ?? "").trim() || undefined;
+  const nombre_tercero = String(raw["Nombre Tercero"] ?? "").trim() || undefined; // ← AGREGADO
 
   return {
     raw,
@@ -182,6 +176,7 @@ export function validateAndCompute(raw: RawRow): ParsedRow {
     cuenta_key,
     clase_cod,
     tercero_key,
+    nombre_tercero, // ← AGREGADO
     cc_key,
     mov_neto,
     nombre_cuenta: String(raw.Nombre ?? "").trim() || undefined,
@@ -209,7 +204,7 @@ export async function parseWorkbook(file: File): Promise<{ rows: ParsedRow[]; sh
   const json = XLSX.utils.sheet_to_json<RawRow>(ws, { defval: "", raw: true });
   const rows = json.map((r, i) => {
     const parsed = validateAndCompute(r);
-    parsed.excelRow = i + 2; // +1 for header, +1 for 1-index
+    parsed.excelRow = i + 2;
     return parsed;
   });
   return { rows, sheetFound: true };
@@ -228,6 +223,7 @@ export function rowToInsert(r: ParsedRow, archivo_id?: string) {
     fecha: r.fecha ? r.fecha.toISOString().slice(0, 10) : null,
     cuenta_key: r.cuenta_key,
     tercero_key: r.tercero_key ?? null,
+    nombre_tercero: r.nombre_tercero ?? null, // ← AGREGADO
     cc_key: r.cc_key,
     clase_cod: r.clase_cod,
     nombre_cuenta: r.nombre_cuenta ?? null,
