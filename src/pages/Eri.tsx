@@ -478,7 +478,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
   const renderConsPct = (vals: ValoresPorCC, bold = false) => {
     const v = getConsolidado(vals);
     if (!v || Math.abs(totalIngresos) < 1) return (
-      <td className="px-2 py-1.5 text-right text-[10px] whitespace-nowrap min-w-[60px]">-</td>
+      <td className="px-2 py-1.5 text-right text-[10px] whitespace-nowrap min-w-[60px] text-muted-foreground/20">-</td>
     );
     const pct = (v / totalIngresos) * 100;
     return (
@@ -496,7 +496,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
         className="cursor-pointer hover:opacity-90"
         onClick={() => toggleSection(sectionKey)}
       >
-        <td colSpan={CC_KEYS.length * 2 + 2} className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-foreground">
+        <td colSpan={CC_KEYS.length * 2 + 3} className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-foreground">
           <span className="mr-2 text-[10px] text-muted-foreground">{isOpen ? "▼" : "▶"}</span>
           {label}
         </td>
