@@ -220,7 +220,7 @@ function TabPeriodo({ plan, filtros }: TabProps) {
                           {fVal.text}
                         </td>
                         <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-                          {pct != null ? `${pct.toFixed(1)}%` : ""}
+                          {pct != null ? `${pct.toFixed(2)}%` : ""}
                         </td>
                       </>
                     )}
@@ -864,7 +864,7 @@ function TabMesAMes({ plan, filtros }: TabProps) {
                       const ingrTotal = valueMap.get(15);
                       const ingAcum = months.reduce((s,m) => s + (ingrTotal?.get(m) ?? 0), 0) || 1;
                       const pct = (total / ingAcum) * 100;
-                      return <td className="whitespace-nowrap px-3 py-1.5 text-right text-[10px] tabular-nums text-muted-foreground">{total !== 0 ? `${pct.toFixed(1)}%` : '-'}</td>;
+                      return <td className="whitespace-nowrap px-3 py-1.5 text-right text-[10px] tabular-nums text-muted-foreground">{total !== 0 ? `${pct.toFixed(2)}%` : '-'}</td>;
                     })()}
                   </tr>
                 );
