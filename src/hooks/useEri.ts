@@ -150,3 +150,26 @@ export function useGastosTercero(filtros: {
     },
   });
 }
+
+export function useGastosPorCC(filtros: {
+  año: number | "Todas";
+  mes: number | "Todos";
+  compania: string;
+}) {
+  return useQuery({
+    queryKey: ["gastos-por-cc", filtros],
+    queryFn: async (): Promise<GastoTerceroRow[]> => {
+      let q = supabase.from("v_gastos_por_tercero").select("*");
+      if (filtros.año !== "Todas") {
+        q = q
+          .gte("año_mes_num", filtros.año * 100 + 1)
+          .lte("año_mes_num", filtros.año * 100 + 12);
+      }
+      if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
+      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []) as unknown as GastoTerceroRow[];
+    },
+  });
+}
