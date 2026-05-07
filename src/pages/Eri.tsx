@@ -5,8 +5,7 @@ import {
   useEri,
   usePlanPyg,
   useEriAllMonths,
-  useEriAllCC,
-  useGastosTercero,
+  useGastosPorCC,
   type GastoTerceroRow,
   type PlanPygRow,
 } from "@/hooks/useEri";
@@ -41,7 +40,7 @@ const CENTROS = [
   { key: "04-MONTERREY", label: "Monterrey" },
 ];
 
-type TabId = "periodo" | "mes-a-mes" | "por-cc" | "detalle-tercero";
+type TabId = "periodo" | "mes-a-mes" | "por-cc";
 
 export default function Eri() {
   const filtros = useFiltros();
@@ -52,7 +51,6 @@ export default function Eri() {
     { id: "periodo", label: "Período" },
     { id: "mes-a-mes", label: "Mes a mes" },
     { id: "por-cc", label: "Por centro de costo" },
-    { id: "detalle-tercero", label: "Detalle por Tercero" },
   ];
 
   return (
@@ -75,8 +73,7 @@ export default function Eri() {
 
       {activeTab === "periodo" && <TabPeriodo plan={plan} filtros={filtros} />}
       {activeTab === "mes-a-mes" && <TabMesAMes plan={plan} filtros={filtros} />}
-      {activeTab === "por-cc" && <TabPorCC plan={plan} filtros={filtros} />}
-      {activeTab === "detalle-tercero" && <TabDetalleTercero filtros={filtros} />}
+      {activeTab === "por-cc" && <TabPorCC filtros={filtros} />}
     </AppLayout>
   );
 }
