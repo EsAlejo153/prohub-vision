@@ -234,31 +234,44 @@ function TabPeriodo({ plan, filtros }: TabProps) {
   );
 }
 
-interface Nivel4 { tercero: string; nit: string; valor: number }
-interface Nivel3 { nombre_cuenta: string; valor: number; terceros: Nivel4[] }
-interface Nivel2 { detalle_gasto: string; valor: number; cuentas: Nivel3[] }
-interface Nivel1 { tipo_gasto: string; valor: number; detalles: Nivel2[] }
+const CC_KEYS = [
+  { key: "01-PRINCIPAL", label: "Principal" },
+  { key: "02-TIENDA CENTRO", label: "Tienda Centro" },
+  { key: "03-DIGITAL", label: "Digital" },
+  { key: "04-MONTERREY", label: "Monterrey" },
+];
 
-function buildTree(rows: GastoTerceroRow[]): Nivel1[] {
-  const map = new Map<string, number>();
+interface ValoresPorCC { [ccKey: string]: number }
+interface Nivel4CC { tercero: string; nit: string; valores: ValoresPorCC }
+interface Nivel3CC { nombre_cuenta: string; valores: ValoresPorCC; terceros: Nivel4CC[] }
+interface Nivel2CC { detalle_gasto: string; valores: ValoresPorCC; cuentas: Nivel3CC[] }
+interface Nivel1CC { tipo_gasto: string; valores: ValoresPorCC; detalles: Nivel2CC[] }
+
+function buildTreeCC(rows: GastoTerceroRow[]): Nivel1CC[] {
+  const map = new Map<string, Map<string, number>>();
   for (const r of rows) {
-    const key4 = `${r.tipo_gasto}||${r.detalle_gasto}||${r.nombre_cuenta}||${r.tercero_nombre}||${r.nit}`;
-    map.set(key4, (map.get(key4) ?? 0) + (Number(r.gasto_real) || 0));
+    const key = `${r.tipo_gasto}||${r.detalle_gasto}||${r.nombre_cuenta}||${r.tercero_nombre}||${r.nit}`;
+    if (!map.has(key)) map.set(key, new Map());
+    const ccMap = map.get(key)!;
+    ccMap.set(r.cc_key, (ccMap.get(r.cc_key) ?? 0) + (Number(r.gasto_real) || 0));
   }
-  const n1Map = new Map<string, Nivel1>();
-  for (const [key, valor] of map.entries()) {
+  const n1Map = new Map<string, Nivel1CC>();
+  for (const [key, ccMap] of map.entries()) {
     const [tipo, detalle, nombre, tercero, nit] = key.split("||");
-    if (!n1Map.has(tipo)) n1Map.set(tipo, { tipo_gasto: tipo, valor: 0, detalles: [] });
+    const valores: ValoresPorCC = {};
+    for (const [cc, v] of ccMap.entries()) valores[cc] = v;
+    if (!n1Map.has(tipo)) n1Map.set(tipo, { tipo_gasto: tipo, valores: {}, detalles: [] });
     const n1 = n1Map.get(tipo)!;
-    n1.valor += valor;
+    for (const [cc, v] of Object.entries(valores)) n1.valores[cc] = (n1.valores[cc] ?? 0) + v;
     let n2 = n1.detalles.find((d) => d.detalle_gasto === detalle);
-    if (!n2) { n2 = { detalle_gasto: detalle, valor: 0, cuentas: [] }; n1.detalles.push(n2); }
-    n2.valor += valor;
+    if (!n2) { n2 = { detalle_gasto: detalle, valores: {}, cuentas: [] }; n1.detalles.push(n2); }
+    for (const [cc, v] of Object.entries(valores)) n2.valores[cc] = (n2.valores[cc] ?? 0) + v;
     let n3 = n2.cuentas.find((c) => c.nombre_cuenta === nombre);
-    if (!n3) { n3 = { nombre_cuenta: nombre, valor: 0, terceros: [] }; n2.cuentas.push(n3); }
-    n3.valor += valor;
-    n3.terceros.push({ tercero, nit, valor });
+    if (!n3) { n3 = { nombre_cuenta: nombre, valores: {}, terceros: [] }; n2.cuentas.push(n3); }
+    for (const [cc, v] of Object.entries(valores)) n3.valores[cc] = (n3.valores[cc] ?? 0) + v;
+    n3.terceros.push({ tercero, nit, valores });
   }
+  const consolidado = (vals: ValoresPorCC) => Object.values(vals).reduce((s, v) => s + v, 0);
   return Array.from(n1Map.values())
     .sort((a, b) => a.tipo_gasto.localeCompare(b.tipo_gasto))
     .map((n1) => ({
@@ -271,13 +284,235 @@ function buildTree(rows: GastoTerceroRow[]): Nivel1[] {
             .sort((a, b) => a.nombre_cuenta.localeCompare(b.nombre_cuenta))
             .map((n3) => ({
               ...n3,
-              terceros: n3.terceros.sort((a, b) => b.valor - a.valor),
+              terceros: n3.terceros.sort((a, b) => consolidado(b.valores) - consolidado(a.valores)),
             })),
         })),
     }));
 }
 
-function TabDetalleTercero({ filtros }: { filtros: FiltroDashboard }) {
+function TabPorCC({ filtros }: { filtros: FiltroDashboard }) {
+  const [mesLocal, setMesLocal] = useState<number | "Todos">("Todos");
+  const gastos = useGastosPorCC({
+    año: filtros.año,
+    mes: mesLocal,
+    compania: filtros.compania,
+  });
+  const tree = useMemo(() => buildTreeCC(gastos.data ?? []), [gastos.data]);
+
+  const [openN1, setOpenN1] = useState<Set<string>>(new Set());
+  const [openN2, setOpenN2] = useState<Set<string>>(new Set());
+  const [openN3, setOpenN3] = useState<Set<string>>(new Set());
+
+  const toggle = (setter: React.Dispatch<React.SetStateAction<Set<string>>>) => (k: string) =>
+    setter((prev) => {
+      const s = new Set(prev);
+      if (s.has(k)) s.delete(k); else s.add(k);
+      return s;
+    });
+  const toggleN1 = toggle(setOpenN1);
+  const toggleN2 = toggle(setOpenN2);
+  const toggleN3 = toggle(setOpenN3);
+
+  const expandAll = () => {
+    setOpenN1(new Set(tree.map((n) => n.tipo_gasto)));
+    setOpenN2(new Set(tree.flatMap((n) => n.detalles.map((d) => `${n.tipo_gasto}||${d.detalle_gasto}`))));
+    setOpenN3(new Set(tree.flatMap((n) => n.detalles.flatMap((d) =>
+      d.cuentas.map((c) => `${n.tipo_gasto}||${d.detalle_gasto}||${c.nombre_cuenta}`)
+    ))));
+  };
+  const collapseAll = () => { setOpenN1(new Set()); setOpenN2(new Set()); setOpenN3(new Set()); };
+
+  const getConsolidado = (vals: ValoresPorCC) =>
+    CC_KEYS.reduce((s, cc) => s + (vals[cc.key] ?? 0), 0);
+
+  const totalConsolidado = tree.reduce((s, n) => s + getConsolidado(n.valores), 0);
+
+  const año = filtros.año === "Todas" ? 2026 : Number(filtros.año);
+  const mesesDisponibles: { value: number | "Todos"; label: string }[] = [
+    { value: "Todos", label: "Acumulado" },
+    ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((m) => ({
+      value: año * 100 + m,
+      label: mesLabel(año * 100 + m),
+    })),
+  ];
+
+  const colClass = "px-2 py-1.5 text-right text-[11px] tabular-nums whitespace-nowrap";
+
+  return (
+    <div>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Mes:</span>
+          {mesesDisponibles.map((m) => (
+            <button
+              key={String(m.value)}
+              onClick={() => setMesLocal(m.value)}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                mesLocal === m.value
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <button onClick={expandAll} className="rounded-md border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">Expandir todo</button>
+          <button onClick={collapseAll} className="rounded-md border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">Contraer todo</button>
+        </div>
+      </div>
+
+      {gastos.isLoading ? (
+        <div className="space-y-1">{Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="h-8 animate-pulse rounded bg-muted/40" />
+        ))}</div>
+      ) : gastos.isError ? (
+        <ErrorState />
+      ) : tree.length === 0 ? (
+        <div className="py-12 text-center text-sm text-muted-foreground">Sin datos para los filtros seleccionados</div>
+      ) : (
+        <div className="overflow-auto rounded-lg border border-border">
+          <table className="w-full border-collapse text-[11px]">
+            <thead className="sticky top-0 z-10 bg-card">
+              <tr className="border-b border-border">
+                <th className="min-w-[240px] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Concepto</th>
+                {CC_KEYS.map((cc) => (
+                  <th key={cc.key} className="min-w-[110px] whitespace-nowrap px-2 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    {cc.label}
+                  </th>
+                ))}
+                <th className="min-w-[120px] whitespace-nowrap px-2 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-primary">Consolidado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tree.map((n1) => {
+                const k1 = n1.tipo_gasto;
+                const isOpen1 = openN1.has(k1);
+                const cons1 = getConsolidado(n1.valores);
+                const fCons1 = formatCell(cons1);
+                return (
+                  <Fragment key={k1}>
+                    <tr
+                      className="cursor-pointer border-b border-border/40 hover:opacity-90"
+                      style={{ background: "#1e2d42" }}
+                      onClick={() => toggleN1(k1)}
+                    >
+                      <td className="px-3 py-2 font-bold text-foreground">
+                        <span className="mr-2 text-muted-foreground">{isOpen1 ? "▼" : "▶"}</span>
+                        {n1.tipo_gasto}
+                      </td>
+                      {CC_KEYS.map((cc) => {
+                        const f = formatCell(n1.valores[cc.key] ?? 0);
+                        return (
+                          <td key={cc.key} className={`${colClass} font-bold ${f.negative ? "text-destructive" : f.zero ? "text-muted-foreground/40" : "text-foreground"}`}>{f.text}</td>
+                        );
+                      })}
+                      <td className={`${colClass} font-bold ${fCons1.negative ? "text-destructive" : "text-foreground"}`}>{fCons1.text}</td>
+                    </tr>
+                    {isOpen1 && n1.detalles.map((n2) => {
+                      const k2 = `${k1}||${n2.detalle_gasto}`;
+                      const isOpen2 = openN2.has(k2);
+                      const cons2 = getConsolidado(n2.valores);
+                      const fCons2 = formatCell(cons2);
+                      return (
+                        <Fragment key={k2}>
+                          <tr
+                            className="cursor-pointer border-b border-border/30 hover:opacity-90"
+                            style={{ background: "#151f33" }}
+                            onClick={() => toggleN2(k2)}
+                          >
+                            <td className="px-3 py-1.5 pl-8 font-semibold text-foreground">
+                              <span className="mr-2 text-muted-foreground">{isOpen2 ? "▼" : "▶"}</span>
+                              {n2.detalle_gasto}
+                            </td>
+                            {CC_KEYS.map((cc) => {
+                              const f = formatCell(n2.valores[cc.key] ?? 0);
+                              return (
+                                <td key={cc.key} className={`${colClass} font-semibold ${f.negative ? "text-destructive" : f.zero ? "text-muted-foreground/40" : "text-foreground"}`}>{f.text}</td>
+                              );
+                            })}
+                            <td className={`${colClass} font-semibold ${fCons2.negative ? "text-destructive" : "text-foreground"}`}>{fCons2.text}</td>
+                          </tr>
+                          {isOpen2 && n2.cuentas.map((n3) => {
+                            const k3 = `${k2}||${n3.nombre_cuenta}`;
+                            const isOpen3 = openN3.has(k3);
+                            const cons3 = getConsolidado(n3.valores);
+                            const fCons3 = formatCell(cons3);
+                            return (
+                              <Fragment key={k3}>
+                                <tr
+                                  className="cursor-pointer border-b border-border/20 hover:opacity-80"
+                                  onClick={() => toggleN3(k3)}
+                                >
+                                  <td className="px-3 py-1.5 pl-14 text-muted-foreground">
+                                    <span className="mr-2 text-muted-foreground/60">{isOpen3 ? "▾" : "▸"}</span>
+                                    {n3.nombre_cuenta}
+                                  </td>
+                                  {CC_KEYS.map((cc) => {
+                                    const f = formatCell(n3.valores[cc.key] ?? 0);
+                                    return (
+                                      <td key={cc.key} className={`${colClass} ${f.negative ? "text-destructive" : f.zero ? "text-muted-foreground/30" : "text-muted-foreground"}`}>{f.text}</td>
+                                    );
+                                  })}
+                                  <td className={`${colClass} ${fCons3.negative ? "text-destructive" : "text-muted-foreground"}`}>{fCons3.text}</td>
+                                </tr>
+                                {isOpen3 && n3.terceros.map((t, ti) => {
+                                  const consT = getConsolidado(t.valores);
+                                  const fConsT = formatCell(consT);
+                                  return (
+                                    <tr
+                                      key={`${k3}||${t.nit}||${ti}`}
+                                      className="border-b border-border/10"
+                                      style={{ background: "#080c18" }}
+                                    >
+                                      <td className="px-3 py-1 pl-20">
+                                        <div className="flex items-center gap-2">
+                                          {t.nit && t.nit !== "SIN TERCERO" && (
+                                            <span className="flex-shrink-0 rounded bg-muted/60 px-1 py-0.5 font-mono text-[9px] text-muted-foreground">{t.nit}</span>
+                                          )}
+                                          <span className="text-[11px] text-muted-foreground/70">{t.tercero}</span>
+                                        </div>
+                                      </td>
+                                      {CC_KEYS.map((cc) => {
+                                        const f = formatCell(t.valores[cc.key] ?? 0);
+                                        return (
+                                          <td key={cc.key} className={`${colClass} ${f.negative ? "text-destructive" : f.zero ? "text-muted-foreground/20" : "text-muted-foreground/60"}`}>{f.text}</td>
+                                        );
+                                      })}
+                                      <td className={`${colClass} ${fConsT.negative ? "text-destructive" : "text-muted-foreground/60"}`}>{fConsT.text}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </Fragment>
+                            );
+                          })}
+                        </Fragment>
+                      );
+                    })}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-border bg-card">
+                <td className="px-3 py-2 text-[11px] font-bold text-foreground">TOTAL GASTOS</td>
+                {CC_KEYS.map((cc) => {
+                  const total = tree.reduce((s, n) => s + (n.valores[cc.key] ?? 0), 0);
+                  const f = formatCell(total);
+                  return (
+                    <td key={cc.key} className={`${colClass} font-bold ${f.negative ? "text-destructive" : "text-foreground"}`}>{f.text}</td>
+                  );
+                })}
+                {(() => { const f = formatCell(totalConsolidado); return <td className={`${colClass} font-bold text-primary`}>{f.text}</td>; })()}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
   const [ccActivo, setCcActivo] = useState("TODOS");
   const gastos = useGastosTercero({
     año: filtros.año,
