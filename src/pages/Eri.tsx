@@ -74,7 +74,7 @@ export default function Eri() {
 
       {activeTab === "periodo" && <TabPeriodo plan={plan} filtros={filtros} />}
       {activeTab === "mes-a-mes" && <TabMesAMes plan={plan} filtros={filtros} />}
-      {activeTab === "por-cc" && <TabPorCC filtros={filtros} />}
+      {activeTab === "por-cc" && <TabPorCC plan={plan} filtros={filtros} />}
     </AppLayout>
   );
 }
