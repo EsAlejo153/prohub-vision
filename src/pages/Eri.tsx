@@ -477,8 +477,8 @@ function TabPorCC({ plan, filtros }: TabProps) {
   };
   const renderConsPct = (vals: ValoresPorCC, bold = false) => {
     const v = getConsolidado(vals);
-    if (!v || !totalIngresos) return (
-      <td className="px-2 py-1.5 text-right text-[10px] text-muted-foreground/20 whitespace-nowrap min-w-[60px]">-</td>
+    if (!v || Math.abs(totalIngresos) < 1) return (
+      <td className="px-2 py-1.5 text-right text-[10px] whitespace-nowrap min-w-[60px]">-</td>
     );
     const pct = (v / totalIngresos) * 100;
     return (
