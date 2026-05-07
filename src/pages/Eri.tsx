@@ -259,6 +259,7 @@ function buildTreeCC(rows: GastoTerceroRow[]): Nivel1CC[] {
   const n1Map = new Map<string, Nivel1CC>();
   for (const [key, ccMap] of map.entries()) {
     const [tipo, detalle, nombre, tercero, nit] = key.split("||");
+    const terceroClean = tercero?.replace(/\d+$/, '').trim() || 'Sin identificar';
     const valores: ValoresPorCC = {};
     for (const [cc, v] of ccMap.entries()) valores[cc] = v;
     if (!n1Map.has(tipo)) n1Map.set(tipo, { tipo_gasto: tipo, valores: {}, detalles: [] });
@@ -270,7 +271,7 @@ function buildTreeCC(rows: GastoTerceroRow[]): Nivel1CC[] {
     let n3 = n2.cuentas.find((c) => c.nombre_cuenta === nombre);
     if (!n3) { n3 = { nombre_cuenta: nombre, valores: {}, terceros: [] }; n2.cuentas.push(n3); }
     for (const [cc, v] of Object.entries(valores)) n3.valores[cc] = (n3.valores[cc] ?? 0) + v;
-    n3.terceros.push({ tercero, nit, valores });
+    n3.terceros.push({ tercero: terceroClean, nit, valores });
   }
   const consolidado = (vals: ValoresPorCC) => Object.values(vals).reduce((s, v) => s + v, 0);
   return Array.from(n1Map.values())
@@ -378,6 +379,17 @@ function TabPorCC({ plan, filtros }: TabProps) {
   }
 
   const vOtrosIngresos = getCCVals(37);
+  // override: aggregate from otrosIngresosCuentas
+  {
+    const agg: ValoresPorCC = {};
+    for (const row of otrosIngresosCuentas) {
+      const vals = getCCVals(row.orden);
+      for (const cc of CC_KEYS) {
+        agg[cc.key] = (agg[cc.key] ?? 0) + (vals[cc.key] ?? 0);
+      }
+    }
+    for (const cc of CC_KEYS) vOtrosIngresos[cc.key] = agg[cc.key] ?? 0;
+  }
   const vOtrosGastos = gastosNoOperTree?.valores ?? {};
 
   const vUtilidadAI: ValoresPorCC = {};
@@ -410,10 +422,17 @@ function TabPorCC({ plan, filtros }: TabProps) {
       <td className={`${colClass} ${bold ? "font-bold" : ""} ${f.negative ? "text-destructive" : f.zero ? "text-muted-foreground/30" : "text-primary"}`}>{f.text}</td>
     );
   };
+  const totalIngresos = getConsolidado(vTotalIngresos) || 1;
+  const renderPctCell = (vals: ValoresPorCC) => {
+    const v = getConsolidado(vals);
+    if (!v) return <td className="px-2 py-1.5 text-right text-[10px] text-muted-foreground/30">-</td>;
+    const pct = (v / totalIngresos) * 100;
+    return <td className="px-2 py-1.5 text-right text-[10px] tabular-nums text-muted-foreground whitespace-nowrap">{pct.toFixed(1)}%</td>;
+  };
 
   const SectionHeader = ({ label }: { label: string }) => (
     <tr style={{ background: "#1e2d42" }}>
-      <td colSpan={CC_KEYS.length + 2} className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-foreground">
+      <td colSpan={CC_KEYS.length + 3} className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-foreground">
         {label}
       </td>
     </tr>
@@ -421,11 +440,14 @@ function TabPorCC({ plan, filtros }: TabProps) {
 
   const EriCuentaRow = ({ row, idx }: { row: PlanPygRow; idx: number }) => {
     const vals = getCCVals(row.orden);
+    const allZero = CC_KEYS.every(cc => (vals[cc.key] ?? 0) === 0) && getConsolidado(vals) === 0;
+    if (allZero) return null;
     return (
       <tr className={`border-b border-border/20 ${idx % 2 === 0 ? "bg-background/10" : ""}`}>
         <td className="px-3 py-1 pl-8 text-[11px] text-muted-foreground">{row.etiqueta_fila || row.concepto}</td>
         {CC_KEYS.map((cc) => renderCellVal(vals, cc))}
         {renderConsCell(vals)}
+        {renderPctCell(vals)}
       </tr>
     );
   };
@@ -435,6 +457,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
       <td className="px-3 py-1.5 text-[11px] font-bold text-foreground">{label}</td>
       {CC_KEYS.map((cc) => renderCellVal(vals, cc, true))}
       {renderConsCell(vals, true)}
+      {renderPctCell(vals)}
     </tr>
   );
 
@@ -443,6 +466,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
       <td className="px-3 py-2 text-[12px] font-bold text-foreground">{label}</td>
       {CC_KEYS.map((cc) => renderCellVal(vals, cc, true))}
       {renderConsCell(vals, true)}
+      {renderPctCell(vals)}
     </tr>
   );
 
@@ -462,10 +486,12 @@ function TabPorCC({ plan, filtros }: TabProps) {
           </td>
           {CC_KEYS.map((cc) => renderCellVal(n1.valores, cc, true))}
           {renderConsCell(n1.valores, true)}
+          {renderPctCell(n1.valores)}
         </tr>
         {isOpen1 && n1.detalles.map((n2) => {
           const k2 = `${k1}||${n2.detalle_gasto}`;
           const isOpen2 = openN2.has(k2);
+          if (getConsolidado(n2.valores) === 0) return null;
           return (
             <Fragment key={k2}>
               <tr
@@ -479,10 +505,12 @@ function TabPorCC({ plan, filtros }: TabProps) {
                 </td>
                 {CC_KEYS.map((cc) => renderCellVal(n2.valores, cc))}
                 {renderConsCell(n2.valores)}
+                {renderPctCell(n2.valores)}
               </tr>
               {isOpen2 && n2.cuentas.map((n3) => {
                 const k3 = `${k2}||${n3.nombre_cuenta}`;
                 const isOpen3 = openN3.has(k3);
+                if (getConsolidado(n3.valores) === 0) return null;
                 return (
                   <Fragment key={k3}>
                     <tr
@@ -495,6 +523,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
                       </td>
                       {CC_KEYS.map((cc) => renderCellVal(n3.valores, cc))}
                       {renderConsCell(n3.valores)}
+                      {renderPctCell(n3.valores)}
                     </tr>
                     {isOpen3 && n3.terceros.map((t, ti) => {
                       const consT = getConsolidado(t.valores);
@@ -516,6 +545,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
                             );
                           })}
                           <td className={`${colClass} text-[10px] ${fConsT.negative ? "text-destructive" : "text-muted-foreground/50"}`}>{fConsT.text}</td>
+                          <td className="px-2 py-1.5 text-right text-[10px] text-muted-foreground/20">-</td>
                         </tr>
                       );
                     })}
@@ -574,6 +604,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
                   </th>
                 ))}
                 <th className="min-w-[120px] whitespace-nowrap px-2 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-primary">Consolidado</th>
+                <th className="min-w-[60px] whitespace-nowrap px-2 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">% Vert.</th>
               </tr>
             </thead>
             <tbody>
