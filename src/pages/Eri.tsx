@@ -456,10 +456,31 @@ function TabPorCC({ plan, filtros }: TabProps) {
       </td>
     );
   };
+  const renderCCPct = (vals: ValoresPorCC, cc: { key: string }, bold = false) => {
+    const ccIngreso = vTotalIngresos[cc.key] || 1;
+    const v = vals[cc.key] ?? 0;
+    if (!v) return <td className="px-2 py-1.5 text-right text-[10px] text-muted-foreground/20 whitespace-nowrap min-w-[55px]">-</td>;
+    const pct = (v / ccIngreso) * 100;
+    return (
+      <td className={`px-2 py-1.5 text-right text-[10px] tabular-nums whitespace-nowrap min-w-[55px] ${bold ? 'font-bold' : ''} text-muted-foreground/60`}>
+        {pct.toFixed(2)}%
+      </td>
+    );
+  };
+  const renderConsPct = (vals: ValoresPorCC, bold = false) => {
+    const v = getConsolidado(vals);
+    if (!v) return <td className="px-2 py-1.5 text-right text-[10px] text-muted-foreground/20 whitespace-nowrap min-w-[60px]">-</td>;
+    const pct = (v / totalIngresos) * 100;
+    return (
+      <td className={`px-2 py-1.5 text-right text-[10px] tabular-nums whitespace-nowrap min-w-[60px] ${bold ? 'font-bold text-primary/80' : 'text-muted-foreground/60'}`}>
+        {pct.toFixed(2)}%
+      </td>
+    );
+  };
 
   const SectionHeader = ({ label }: { label: string }) => (
     <tr style={{ background: "#1e2d42" }}>
-      <td colSpan={CC_KEYS.length + 3} className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-foreground">
+      <td colSpan={CC_KEYS.length * 2 + 2} className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-foreground">
         {label}
       </td>
     </tr>
@@ -482,9 +503,9 @@ function TabPorCC({ plan, filtros }: TabProps) {
             <span className="mr-2 text-[10px] text-muted-foreground/50">{isOpen ? "▾" : "▸"}</span>
             {row.etiqueta_fila || row.concepto}
           </td>
-          {CC_KEYS.map((cc) => renderCellVal(vals, cc))}
+          {CC_KEYS.map((cc) => <Fragment key={cc.key}>{renderCellVal(vals, cc)}{renderCCPct(vals, cc)}</Fragment>)}
           {renderConsCell(vals)}
-          {renderPctCell(vals)}
+          {renderConsPct(vals)}
         </tr>
         {isOpen && CC_KEYS.map(cc => {
           const tercMap = ccTercMap?.get(cc.key);
@@ -505,10 +526,15 @@ function TabPorCC({ plan, filtros }: TabProps) {
                   {CC_KEYS.map(c => {
                     const v = c.key === cc.key ? val : 0;
                     const fv = formatCell(v);
-                    return <td key={c.key} className={`px-2 py-0.5 text-right text-[10px] tabular-nums whitespace-nowrap min-w-[110px] ${fv.zero ? 'text-muted-foreground/20' : fv.negative ? 'text-destructive' : 'text-muted-foreground/60'}`}>{fv.text}</td>;
+                    return (
+                      <Fragment key={c.key}>
+                        <td className={`px-2 py-0.5 text-right text-[10px] tabular-nums whitespace-nowrap min-w-[110px] ${fv.zero ? 'text-muted-foreground/20' : fv.negative ? 'text-destructive' : 'text-muted-foreground/60'}`}>{fv.text}</td>
+                        <td className="px-2 py-0.5 min-w-[55px]" />
+                      </Fragment>
+                    );
                   })}
                   <td className={`px-2 py-0.5 text-right text-[10px] tabular-nums whitespace-nowrap min-w-[110px] ${f.negative ? 'text-destructive' : 'text-muted-foreground/60'}`}>{f.text}</td>
-                  <td className="px-2 py-0.5 text-right text-[10px] text-muted-foreground/30">-</td>
+                  <td className="px-2 py-0.5 min-w-[60px]" />
                 </tr>
               );
             });
@@ -520,18 +546,18 @@ function TabPorCC({ plan, filtros }: TabProps) {
   const TotalRow = ({ label, vals }: { label: string; vals: ValoresPorCC }) => (
     <tr className="border-b border-border" style={{ background: getConsolidado(vals) >= 0 ? "#1a2d1a" : "#2d1a1a" }}>
       <td className="px-3 py-1.5 text-[11px] font-bold text-foreground">{label}</td>
-      {CC_KEYS.map((cc) => renderCellVal(vals, cc, true))}
+      {CC_KEYS.map((cc) => <Fragment key={cc.key}>{renderCellVal(vals, cc, true)}{renderCCPct(vals, cc, true)}</Fragment>)}
       {renderConsCell(vals, true)}
-      {renderPctCell(vals, true)}
+      {renderConsPct(vals, true)}
     </tr>
   );
 
   const SubtotalRow = ({ label, vals }: { label: string; vals: ValoresPorCC }) => (
     <tr className="border-b border-border border-l-2 border-l-primary" style={{ background: "#0d2040" }}>
       <td className="px-3 py-2 text-[12px] font-bold text-foreground">{label}</td>
-      {CC_KEYS.map((cc) => renderCellVal(vals, cc, true))}
+      {CC_KEYS.map((cc) => <Fragment key={cc.key}>{renderCellVal(vals, cc, true)}{renderCCPct(vals, cc, true)}</Fragment>)}
       {renderConsCell(vals, true)}
-      {renderPctCell(vals, true)}
+      {renderConsPct(vals, true)}
     </tr>
   );
 
@@ -549,9 +575,9 @@ function TabPorCC({ plan, filtros }: TabProps) {
             <span className="mr-2 text-[10px] text-muted-foreground">{isOpen1 ? "▼" : "▶"}</span>
             {n1.tipo_gasto}
           </td>
-          {CC_KEYS.map((cc) => renderCellVal(n1.valores, cc, true))}
+          {CC_KEYS.map((cc) => <Fragment key={cc.key}>{renderCellVal(n1.valores, cc, true)}{renderCCPct(n1.valores, cc, true)}</Fragment>)}
           {renderConsCell(n1.valores, true)}
-          {renderPctCell(n1.valores, true)}
+          {renderConsPct(n1.valores, true)}
         </tr>
         {isOpen1 && n1.detalles.map((n2) => {
           const k2 = `${k1}||${n2.detalle_gasto}`;
@@ -568,9 +594,9 @@ function TabPorCC({ plan, filtros }: TabProps) {
                   <span className="mr-2 text-[10px] text-muted-foreground/60">{isOpen2 ? "▾" : "▸"}</span>
                   {n2.detalle_gasto}
                 </td>
-                {CC_KEYS.map((cc) => renderCellVal(n2.valores, cc))}
+                {CC_KEYS.map((cc) => <Fragment key={cc.key}>{renderCellVal(n2.valores, cc)}{renderCCPct(n2.valores, cc)}</Fragment>)}
                 {renderConsCell(n2.valores)}
-                {renderPctCell(n2.valores)}
+                {renderConsPct(n2.valores)}
               </tr>
               {isOpen2 && n2.cuentas.map((n3) => {
                 const k3 = `${k2}||${n3.nombre_cuenta}`;
@@ -586,9 +612,9 @@ function TabPorCC({ plan, filtros }: TabProps) {
                         <span className="mr-2 text-[10px] text-muted-foreground/40">{isOpen3 ? "▾" : "▸"}</span>
                         {n3.nombre_cuenta}
                       </td>
-                      {CC_KEYS.map((cc) => renderCellVal(n3.valores, cc))}
+                      {CC_KEYS.map((cc) => <Fragment key={cc.key}>{renderCellVal(n3.valores, cc)}{renderCCPct(n3.valores, cc)}</Fragment>)}
                       {renderConsCell(n3.valores)}
-                      {renderPctCell(n3.valores)}
+                      {renderConsPct(n3.valores)}
                     </tr>
                     {isOpen3 && n3.terceros.map((t, ti) => {
                       const consT = getConsolidado(t.valores);
@@ -600,17 +626,29 @@ function TabPorCC({ plan, filtros }: TabProps) {
                               {t.nit && t.nit !== "SIN TERCERO" && (
                                 <span className="flex-shrink-0 rounded bg-muted/40 px-1 font-mono text-[9px] text-muted-foreground">{t.nit}</span>
                               )}
+                              {(() => {
+                                const activeCCs = CC_KEYS.filter(cc => (t.valores[cc.key] ?? 0) !== 0);
+                                if (activeCCs.length === 1) return (
+                                  <span className="flex-shrink-0 rounded bg-primary/20 px-1 font-mono text-[9px] text-primary/70">
+                                    {activeCCs[0].label}
+                                  </span>
+                                );
+                                return null;
+                              })()}
                               <span className="text-[10px] text-muted-foreground/60">{t.tercero}</span>
                             </div>
                           </td>
                           {CC_KEYS.map((cc) => {
                             const f = formatCell(t.valores[cc.key] ?? 0);
                             return (
-                              <td key={cc.key} className={`${colClass} text-[10px] ${f.negative ? "text-destructive" : f.zero ? "text-muted-foreground/20" : "text-muted-foreground/50"}`}>{f.text}</td>
+                              <Fragment key={cc.key}>
+                                <td className={`${colClass} text-[10px] ${f.negative ? "text-destructive" : f.zero ? "text-muted-foreground/20" : "text-muted-foreground/50"}`}>{f.text}</td>
+                                <td className="px-2 py-0.5 min-w-[55px]" />
+                              </Fragment>
                             );
                           })}
                           <td className={`${colClass} text-[10px] ${fConsT.negative ? "text-destructive" : "text-muted-foreground/50"}`}>{fConsT.text}</td>
-                          <td className="px-2 py-1.5 text-right text-[10px] text-muted-foreground/20">-</td>
+                          <td className="px-2 py-0.5 min-w-[60px]" />
                         </tr>
                       );
                     })}
@@ -664,12 +702,17 @@ function TabPorCC({ plan, filtros }: TabProps) {
               <tr className="border-b border-border">
                 <th className="min-w-[240px] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Concepto</th>
                 {CC_KEYS.map((cc) => (
-                  <th key={cc.key} className="min-w-[110px] whitespace-nowrap px-2 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    {cc.label}
-                  </th>
+                  <Fragment key={cc.key}>
+                    <th className="min-w-[110px] whitespace-nowrap px-2 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      {cc.label}
+                    </th>
+                    <th className="min-w-[55px] whitespace-nowrap px-2 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
+                      %
+                    </th>
+                  </Fragment>
                 ))}
                 <th className="min-w-[120px] whitespace-nowrap px-2 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-primary">Consolidado</th>
-                <th className="min-w-[60px] whitespace-nowrap px-2 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">% Vert.</th>
+                <th className="min-w-[60px] whitespace-nowrap px-2 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-primary/60">%</th>
               </tr>
             </thead>
             <tbody>
