@@ -765,17 +765,17 @@ function TabPorCC({ plan, filtros }: TabProps) {
 
 function TabMesAMes({ plan, filtros }: TabProps) {
   const [ccActivo, setCcActivo] = useState("TODOS");
-  const eriAll = useEriAllMonths({
-    año: filtros.año,
-    compania: filtros.compania,
-    ccKey: ccActivo,
-  });
+  const eriAll = useEriAllMonths({ año: filtros.año, compania: filtros.compania, ccKey: ccActivo });
 
   const [openSections, setOpenSections] = useState<Set<string>>(
-    new Set(['ingresos', 'costos', 'gastos', 'otros-ingresos', 'otros-gastos'])
+    new Set(['ingresos','costos','gastos','otros-ingresos','otros-gastos'])
   );
+  const [openTercero, setOpenTercero] = useState<Set<number>>(new Set());
+
   const toggleSection = (k: string) =>
     setOpenSections(prev => { const s = new Set(prev); s.has(k) ? s.delete(k) : s.add(k); return s; });
+  const toggleTercero = (orden: number) =>
+    setOpenTercero(prev => { const s = new Set(prev); s.has(orden) ? s.delete(orden) : s.add(orden); return s; });
 
   const { planRows, valueMap, months } = useMemo(() => {
     const planRows: PlanPygRow[] = plan.data ?? [];
@@ -784,89 +784,169 @@ function TabMesAMes({ plan, filtros }: TabProps) {
     for (const r of eriAll.data ?? []) {
       monthSet.add(r.año_mes_num);
       let inner = map.get(r.orden);
-      if (!inner) {
-        inner = new Map();
-        map.set(r.orden, inner);
-      }
+      if (!inner) { inner = new Map(); map.set(r.orden, inner); }
       inner.set(r.año_mes_num, (inner.get(r.año_mes_num) ?? 0) + (Number(r.valor_pyg) || 0));
     }
     const months = Array.from(monthSet).sort((a, b) => a - b);
     return { planRows, valueMap: map, months };
   }, [plan.data, eriAll.data]);
 
-  const totalIngresosAcum = useMemo(() => {
-    const ingRows = planRows.filter(r => r.nivel === 'Cuenta' && (r as any).clase_cod === '4' && (r as any).grupo_cod === '41');
-    let total = 0;
-    for (const row of ingRows) {
-      const inner = valueMap.get(row.orden);
-      if (inner) for (const v of inner.values()) total += v;
+  const terceroMap = useMemo(() => {
+    const map = new Map<number, Map<number, Map<string, number>>>();
+    for (const r of eriAll.data ?? []) {
+      if (!map.has(r.orden)) map.set(r.orden, new Map());
+      const mesMap = map.get(r.orden)!;
+      if (!mesMap.has(r.año_mes_num)) mesMap.set(r.año_mes_num, new Map());
+      const nombre = ((r as any).concepto ?? '').replace(/\d+$/, '').trim() || 'Sin detalle';
+      const tercMap = mesMap.get(r.año_mes_num)!;
+      tercMap.set(nombre, (tercMap.get(nombre) ?? 0) + (Number(r.valor_pyg) || 0));
     }
-    return total || 1;
-  }, [planRows, valueMap]);
+    return map;
+  }, [eriAll.data]);
+
+  const sumOrdens = (ordenes: number[]) => {
+    const result = new Map<number, number>();
+    for (const orden of ordenes) {
+      const inner = valueMap.get(orden);
+      if (!inner) continue;
+      for (const [mes, v] of inner.entries()) result.set(mes, (result.get(mes) ?? 0) + v);
+    }
+    return result;
+  };
+
+  const ingresoRows = planRows.filter(r => r.nivel === 'Cuenta' && (r as any).clase_cod === '4' && (r as any).grupo_cod === '41');
+  const costosRows = planRows.filter(r => r.nivel === 'Cuenta' && (r as any).clase_cod === '6');
+  const gastosRows = planRows.filter(r => r.nivel === 'Cuenta' && (r as any).clase_cod === '5');
+  const otrosIngRows = planRows.filter(r => r.nivel === 'Cuenta' && (r as any).clase_cod === '4' && (r as any).grupo_cod === '42');
+
+  const mapTotalIngresos = useMemo(() => sumOrdens(ingresoRows.map(r => r.orden)), [valueMap, ingresoRows]);
+  const mapTotalCostos = useMemo(() => sumOrdens(costosRows.map(r => r.orden)), [valueMap, costosRows]);
+  const mapTotalGastos = useMemo(() => sumOrdens(gastosRows.map(r => r.orden)), [valueMap, gastosRows]);
+  const mapOtrosIngresos = useMemo(() => sumOrdens(otrosIngRows.map(r => r.orden)), [valueMap, otrosIngRows]);
+
+  const mapUtilBruta = useMemo(() => {
+    const result = new Map<number, number>();
+    for (const mes of months) {
+      result.set(mes, (mapTotalIngresos.get(mes) ?? 0) + (mapTotalCostos.get(mes) ?? 0));
+    }
+    return result;
+  }, [mapTotalIngresos, mapTotalCostos, months]);
+
+  const mapUtilOper = useMemo(() => {
+    const result = new Map<number, number>();
+    for (const mes of months) {
+      result.set(mes, (mapUtilBruta.get(mes) ?? 0) - (mapTotalGastos.get(mes) ?? 0));
+    }
+    return result;
+  }, [mapUtilBruta, mapTotalGastos, months]);
+
+  const mapUtilNeta = useMemo(() => {
+    const result = new Map<number, number>();
+    for (const mes of months) {
+      result.set(mes, (mapUtilOper.get(mes) ?? 0) + (mapOtrosIngresos.get(mes) ?? 0));
+    }
+    return result;
+  }, [mapUtilOper, mapOtrosIngresos, months]);
+
+  const totalIngresosAcum = useMemo(() =>
+    months.reduce((s, m) => s + (mapTotalIngresos.get(m) ?? 0), 0) || 1,
+    [mapTotalIngresos, months]);
 
   const isLoading = plan.isLoading || eriAll.isLoading;
   const isError = plan.isError || eriAll.isError;
-
   const colClass = "whitespace-nowrap px-3 py-1.5 text-right tabular-nums";
 
-  const renderRow = (row: PlanPygRow, idx: number) => {
+  const renderCuentaRow = (row: PlanPygRow, idx: number) => {
     const inner = valueMap.get(row.orden);
     const monthValues = months.map(m => inner?.get(m) ?? 0);
     const total = monthValues.reduce((s, v) => s + v, 0);
-    if (row.nivel === 'Cuenta' && total === 0 && monthValues.every(v => v === 0)) return null;
-
-    const isTitulo = row.nivel === 'Titulo';
-    const isTotal = row.nivel === 'Total';
-    const isSubtotal = row.nivel === 'Subtotal';
-    const rowStyle: React.CSSProperties = {};
-    let rowClass = 'border-b border-border/40';
-    let indent = 'px-3';
-    if (isTitulo) {
-      rowStyle.background = '#1e2d42';
-      rowClass += ' font-bold text-foreground';
-    } else if (isTotal) {
-      rowStyle.background = total >= 0 ? '#1a2d1a' : '#2d1a1a';
-      rowClass += ' font-bold';
-    } else if (isSubtotal) {
-      rowStyle.background = '#0d2040';
-      rowClass += ' font-bold text-[12px] border-l-2 border-l-primary';
-    } else {
-      rowClass += idx % 2 === 0 ? ' bg-background/20' : '';
-      indent = 'px-3 pl-8';
-    }
-    const pct = !isTitulo && total !== 0 ? (total / totalIngresosAcum) * 100 : null;
+    if (total === 0 && monthValues.every(v => v === 0)) return null;
+    const isOpen = openTercero.has(row.orden);
+    const hasTerceros = terceroMap.has(row.orden);
+    const pct = total !== 0 ? (total / totalIngresosAcum) * 100 : null;
     return (
-      <tr key={row.orden} className={rowClass} style={rowStyle}>
-        <td className={`${indent} py-1.5 text-[11px] ${isTitulo || isSubtotal || isTotal ? 'text-foreground' : 'text-muted-foreground'}`}>
-          {row.etiqueta_fila || row.concepto}
+      <Fragment key={row.orden}>
+        <tr
+          className={`border-b border-border/30 cursor-pointer hover:opacity-90 ${idx % 2 === 0 ? 'bg-background/20' : ''}`}
+          onClick={() => hasTerceros && toggleTercero(row.orden)}
+        >
+          <td className="px-3 py-1 pl-8 text-[11px] text-muted-foreground">
+            {hasTerceros && <span className="mr-2 text-[10px] text-muted-foreground/50">{isOpen ? '▾' : '▸'}</span>}
+            {row.etiqueta_fila || row.concepto}
+          </td>
+          {monthValues.map((v, i) => {
+            const f = formatCell(v);
+            return <td key={i} className={`${colClass} text-[11px] ${f.negative ? 'text-destructive' : f.zero ? 'text-muted-foreground/30' : 'text-foreground'}`}>{f.text}</td>;
+          })}
+          {(() => { const f = formatCell(total); return <td className={`${colClass} text-[11px] font-semibold text-primary ${f.negative ? 'text-destructive' : f.zero ? 'text-muted-foreground/30' : ''}`}>{f.text}</td>; })()}
+          <td className="whitespace-nowrap px-3 py-1 text-right text-[10px] tabular-nums text-muted-foreground/70">
+            {pct != null ? `${pct.toFixed(2)}%` : '-'}
+          </td>
+        </tr>
+        {isOpen && months.map(mes => {
+          const tercMesMap = terceroMap.get(row.orden)?.get(mes);
+          if (!tercMesMap) return null;
+          return Array.from(tercMesMap.entries())
+            .filter(([, v]) => v !== 0)
+            .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+            .map(([nombre, val], ti) => {
+              const f = formatCell(val);
+              return (
+                <tr key={`${row.orden}||${mes}||${ti}`} className="border-b border-border/10" style={{ background: '#080c18' }}>
+                  <td className="px-3 py-0.5 pl-16 text-[10px] text-muted-foreground/60">
+                    <span className="mr-2 text-[9px] bg-muted/40 px-1 rounded font-mono">{mesLabel(mes)}</span>
+                    {nombre}
+                  </td>
+                  {months.map(m => {
+                    const v = m === mes ? val : 0;
+                    const fv = formatCell(v);
+                    return <td key={m} className={`${colClass} text-[10px] ${fv.zero ? 'text-muted-foreground/20' : fv.negative ? 'text-destructive' : 'text-muted-foreground/50'}`}>{fv.text}</td>;
+                  })}
+                  <td className={`${colClass} text-[10px] ${f.negative ? 'text-destructive' : 'text-muted-foreground/50'}`}>{f.text}</td>
+                  <td className="px-3 py-0.5 text-right text-[10px] text-muted-foreground/20">-</td>
+                </tr>
+              );
+            });
+        })}
+      </Fragment>
+    );
+  };
+
+  const SubtotalRowM = ({ label, dataMap, highlight = false }: { label: string; dataMap: Map<number, number>; highlight?: boolean }) => {
+    const monthValues = months.map(m => dataMap.get(m) ?? 0);
+    const total = monthValues.reduce((s, v) => s + v, 0);
+    const pct = total !== 0 ? (total / totalIngresosAcum) * 100 : null;
+    const bg = highlight ? '#0d2040' : total >= 0 ? '#1a2d1a' : '#2d1a1a';
+    return (
+      <tr className="border-b border-border border-l-2 border-l-primary font-bold" style={{ background: bg }}>
+        <td className="px-3 py-2 text-[12px] font-bold text-foreground">{label}</td>
+        {monthValues.map((v, i) => {
+          const f = formatCell(v);
+          return <td key={i} className={`${colClass} font-bold ${f.negative ? 'text-destructive' : f.zero ? 'text-muted-foreground/30' : 'text-foreground'}`}>{f.text}</td>;
+        })}
+        {(() => { const f = formatCell(total); return <td className={`${colClass} font-bold ${f.negative ? 'text-destructive' : f.zero ? 'text-muted-foreground/30' : 'text-primary'}`}>{f.text}</td>; })()}
+        <td className="whitespace-nowrap px-3 py-2 text-right text-[10px] tabular-nums font-bold text-muted-foreground/70">
+          {pct != null ? `${pct.toFixed(2)}%` : '-'}
         </td>
-        {isTitulo
-          ? months.map(m => <td key={m} className="px-3 py-1.5" />)
-          : monthValues.map((v, i) => {
-              const f = formatCell(v);
-              return (
-                <td key={i} className={`${colClass} ${f.negative ? 'text-destructive' : f.zero ? 'text-muted-foreground/30' : 'text-foreground'}`}>
-                  {f.text}
-                </td>
-              );
-            })}
-        {isTitulo ? (
-          <><td className="px-3 py-1.5" /><td className="px-3 py-1.5" /></>
-        ) : (
-          <>
-            {(() => {
-              const f = formatCell(total);
-              return (
-                <td className={`${colClass} font-semibold ${f.negative ? 'text-destructive' : f.zero ? 'text-muted-foreground/30' : isSubtotal ? 'text-foreground' : 'text-primary'}`}>
-                  {f.text}
-                </td>
-              );
-            })()}
-            <td className={`whitespace-nowrap px-3 py-1.5 text-right text-[10px] tabular-nums text-muted-foreground/70 ${isTotal || isSubtotal ? 'font-bold' : ''}`}>
-              {pct != null ? `${pct.toFixed(2)}%` : '-'}
-            </td>
-          </>
-        )}
+      </tr>
+    );
+  };
+
+  const TotalRowM = ({ label, dataMap }: { label: string; dataMap: Map<number, number> }) => {
+    const monthValues = months.map(m => dataMap.get(m) ?? 0);
+    const total = monthValues.reduce((s, v) => s + v, 0);
+    const pct = total !== 0 ? (total / totalIngresosAcum) * 100 : null;
+    return (
+      <tr className="border-b border-border font-bold" style={{ background: total >= 0 ? '#1a2d1a' : '#2d1a1a' }}>
+        <td className="px-3 py-1.5 text-[11px] font-bold text-foreground">{label}</td>
+        {monthValues.map((v, i) => {
+          const f = formatCell(v);
+          return <td key={i} className={`${colClass} font-bold ${f.negative ? 'text-destructive' : f.zero ? 'text-muted-foreground/30' : 'text-foreground'}`}>{f.text}</td>;
+        })}
+        {(() => { const f = formatCell(total); return <td className={`${colClass} font-bold ${f.negative ? 'text-destructive' : f.zero ? 'text-muted-foreground/30' : 'text-foreground'}`}>{f.text}</td>; })()}
+        <td className="whitespace-nowrap px-3 py-1.5 text-right text-[10px] tabular-nums font-bold text-muted-foreground/70">
+          {pct != null ? `${pct.toFixed(2)}%` : '-'}
+        </td>
       </tr>
     );
   };
@@ -884,17 +964,6 @@ function TabMesAMes({ plan, filtros }: TabProps) {
     );
   };
 
-  const ingresoRows = planRows.filter(r => (r as any).clase_cod === '4' && (r as any).grupo_cod === '41');
-  const costosRows = planRows.filter(r => (r as any).clase_cod === '6');
-  const gastosRows = planRows.filter(r => (r as any).clase_cod === '5');
-  const otrosIngRows = planRows.filter(r => (r as any).clase_cod === '4' && (r as any).grupo_cod === '42');
-
-  const utilBrutaRow = planRows.find(r => r.nivel === 'Subtotal' && r.orden === 20);
-  const utilOperRow = planRows.find(r => r.nivel === 'Subtotal' && r.orden === 83);
-  const utilNetaRow = planRows.find(r => r.nivel === 'Subtotal' && r.orden === 96);
-  const totIngRow = planRows.find(r => r.nivel === 'Total' && r.orden === 15);
-  const totCostRow = planRows.find(r => r.nivel === 'Total' && r.orden === 19);
-
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
@@ -911,51 +980,44 @@ function TabMesAMes({ plan, filtros }: TabProps) {
         </div>
       </div>
       {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 12 }).map((_, i) => (
-            <LoadingSkeleton key={i} className="h-7 w-full" />
-          ))}
-        </div>
-      ) : isError ? (
-        <ErrorState />
-      ) : planRows.length === 0 || months.length === 0 ? (
-        <EmptyState />
-      ) : (
+        <div className="space-y-2">{Array.from({ length: 12 }).map((_, i) => <LoadingSkeleton key={i} className="h-7 w-full" />)}</div>
+      ) : isError ? <ErrorState />
+      : planRows.length === 0 || months.length === 0 ? <EmptyState />
+      : (
         <div className="overflow-auto rounded-lg border border-border">
           <table className="w-full border-collapse text-[11px]">
             <thead className="sticky top-0 z-10 bg-card">
               <tr className="border-b border-border">
-                <th className="min-w-[260px] px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Concepto
-                </th>
-                {months.map((m) => (
-                  <th
-                    key={m}
-                    className="whitespace-nowrap px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground"
-                  >
-                    {mesLabel(m)}
-                  </th>
+                <th className="min-w-[260px] px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">Concepto</th>
+                {months.map(m => (
+                  <th key={m} className="whitespace-nowrap px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">{mesLabel(m)}</th>
                 ))}
-                <th className="whitespace-nowrap px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-primary">
-                  Acumulado
-                </th>
+                <th className="whitespace-nowrap px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-primary">Acumulado</th>
                 <th className="min-w-[70px] whitespace-nowrap px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">% Vert.</th>
               </tr>
             </thead>
             <tbody>
               <SectionHeader label="INGRESOS OPERACIONALES" sectionKey="ingresos" />
-              {openSections.has('ingresos') && ingresoRows.map((r,i) => renderRow(r,i))}
-              {openSections.has('ingresos') && totIngRow && renderRow(totIngRow, 99)}
+              {openSections.has('ingresos') && ingresoRows.map((r, i) => renderCuentaRow(r, i))}
+              <TotalRowM label="TOTAL INGRESOS OPERACIONALES" dataMap={mapTotalIngresos} />
+
               <SectionHeader label="COSTOS DE VENTAS" sectionKey="costos" />
-              {openSections.has('costos') && costosRows.map((r,i) => renderRow(r,i))}
-              {openSections.has('costos') && totCostRow && renderRow(totCostRow, 99)}
-              {utilBrutaRow && renderRow(utilBrutaRow, 99)}
+              {openSections.has('costos') && costosRows.map((r, i) => renderCuentaRow(r, i))}
+              <TotalRowM label="TOTAL COSTOS" dataMap={mapTotalCostos} />
+
+              <SubtotalRowM label="UTILIDAD BRUTA" dataMap={mapUtilBruta} highlight />
+
               <SectionHeader label="GASTOS OPERACIONALES" sectionKey="gastos" />
-              {openSections.has('gastos') && gastosRows.map((r,i) => renderRow(r,i))}
-              {utilOperRow && renderRow(utilOperRow, 99)}
+              {openSections.has('gastos') && gastosRows.map((r, i) => renderCuentaRow(r, i))}
+              <TotalRowM label="TOTAL GASTOS OPERACIONALES" dataMap={mapTotalGastos} />
+
+              <SubtotalRowM label="UTILIDAD OPERACIONAL" dataMap={mapUtilOper} highlight />
+
               <SectionHeader label="OTROS INGRESOS" sectionKey="otros-ingresos" />
-              {openSections.has('otros-ingresos') && otrosIngRows.map((r,i) => renderRow(r,i))}
-              {utilNetaRow && renderRow(utilNetaRow, 99)}
+              {openSections.has('otros-ingresos') && otrosIngRows.map((r, i) => renderCuentaRow(r, i))}
+              <TotalRowM label="TOTAL OTROS INGRESOS" dataMap={mapOtrosIngresos} />
+
+              <SubtotalRowM label="UTILIDAD NETA" dataMap={mapUtilNeta} highlight />
             </tbody>
           </table>
         </div>
