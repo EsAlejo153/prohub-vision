@@ -361,8 +361,20 @@ function TabPorCC({ plan, filtros }: TabProps) {
     (r) => r.nivel === "Cuenta" && (r as any).clase_cod === "6"
   );
 
-  const vTotalIngresos = getCCVals(15);
-  const vTotalCostos = getCCVals(19);
+  const vTotalIngresos: ValoresPorCC = {};
+  for (const row of ingresosCuentas) {
+    const v = getCCVals(row.orden);
+    for (const cc of CC_KEYS) {
+      vTotalIngresos[cc.key] = (vTotalIngresos[cc.key] ?? 0) + (v[cc.key] ?? 0);
+    }
+  }
+  const vTotalCostos: ValoresPorCC = {};
+  for (const row of costosCuentas) {
+    const v = getCCVals(row.orden);
+    for (const cc of CC_KEYS) {
+      vTotalCostos[cc.key] = (vTotalCostos[cc.key] ?? 0) + (v[cc.key] ?? 0);
+    }
+  }
 
   const vUtilidadBruta: ValoresPorCC = {};
   for (const cc of CC_KEYS) {
@@ -378,17 +390,12 @@ function TabPorCC({ plan, filtros }: TabProps) {
     vUtilidadOper[cc.key] = (vUtilidadBruta[cc.key] ?? 0) - (vGastosOper[cc.key] ?? 0);
   }
 
-  const vOtrosIngresos = getCCVals(37);
-  // override: aggregate from otrosIngresosCuentas
-  {
-    const agg: ValoresPorCC = {};
-    for (const row of otrosIngresosCuentas) {
-      const vals = getCCVals(row.orden);
-      for (const cc of CC_KEYS) {
-        agg[cc.key] = (agg[cc.key] ?? 0) + (vals[cc.key] ?? 0);
-      }
+  const vOtrosIngresos: ValoresPorCC = {};
+  for (const row of otrosIngresosCuentas) {
+    const v = getCCVals(row.orden);
+    for (const cc of CC_KEYS) {
+      vOtrosIngresos[cc.key] = (vOtrosIngresos[cc.key] ?? 0) + (v[cc.key] ?? 0);
     }
-    for (const cc of CC_KEYS) vOtrosIngresos[cc.key] = agg[cc.key] ?? 0;
   }
   const vOtrosGastos = gastosNoOperTree?.valores ?? {};
 
