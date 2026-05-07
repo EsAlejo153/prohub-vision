@@ -110,3 +110,43 @@ export function useEriAllCC(filtros: {
     },
   });
 }
+
+export interface GastoTerceroRow {
+  compania: string;
+  cc_key: string;
+  año_mes_num: number;
+  cuenta_key: string;
+  tipo_gasto: string;
+  detalle_gasto: string;
+  nombre_cuenta: string;
+  orden_tipo: number;
+  orden_detalle: number;
+  nit: string;
+  tercero_nombre: string;
+  gasto_real: number;
+}
+
+export function useGastosTercero(filtros: {
+  año: number | "Todas";
+  mes: number | "Todos";
+  compania: string;
+  ccKey: string;
+}) {
+  return useQuery({
+    queryKey: ["gastos-tercero", filtros],
+    queryFn: async (): Promise<GastoTerceroRow[]> => {
+      let q = supabase.from("v_gastos_por_tercero").select("*");
+      if (filtros.año !== "Todas") {
+        q = q
+          .gte("año_mes_num", filtros.año * 100 + 1)
+          .lte("año_mes_num", filtros.año * 100 + 12);
+      }
+      if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
+      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+      if (filtros.ccKey !== "TODOS") q = q.eq("cc_key", filtros.ccKey);
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []) as unknown as GastoTerceroRow[];
+    },
+  });
+}

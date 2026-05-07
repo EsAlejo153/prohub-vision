@@ -6,6 +6,8 @@ import {
   usePlanPyg,
   useEriAllMonths,
   useEriAllCC,
+  useGastosTercero,
+  type GastoTerceroRow,
   type PlanPygRow,
 } from "@/hooks/useEri";
 import {
@@ -39,7 +41,7 @@ const CENTROS = [
   { key: "04-MONTERREY", label: "Monterrey" },
 ];
 
-type TabId = "periodo" | "mes-a-mes" | "por-cc";
+type TabId = "periodo" | "mes-a-mes" | "por-cc" | "detalle-tercero";
 
 export default function Eri() {
   const filtros = useFiltros();
@@ -50,6 +52,7 @@ export default function Eri() {
     { id: "periodo", label: "Período" },
     { id: "mes-a-mes", label: "Mes a mes" },
     { id: "por-cc", label: "Por centro de costo" },
+    { id: "detalle-tercero", label: "Detalle por Tercero" },
   ];
 
   return (
@@ -73,6 +76,7 @@ export default function Eri() {
       {activeTab === "periodo" && <TabPeriodo plan={plan} filtros={filtros} />}
       {activeTab === "mes-a-mes" && <TabMesAMes plan={plan} filtros={filtros} />}
       {activeTab === "por-cc" && <TabPorCC plan={plan} filtros={filtros} />}
+      {activeTab === "detalle-tercero" && <TabDetalleTercero filtros={filtros} />}
     </AppLayout>
   );
 }
@@ -227,6 +231,212 @@ function TabPeriodo({ plan, filtros }: TabProps) {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface Nivel4 { tercero: string; nit: string; valor: number }
+interface Nivel3 { nombre_cuenta: string; valor: number; terceros: Nivel4[] }
+interface Nivel2 { detalle_gasto: string; valor: number; cuentas: Nivel3[] }
+interface Nivel1 { tipo_gasto: string; valor: number; detalles: Nivel2[] }
+
+function buildTree(rows: GastoTerceroRow[]): Nivel1[] {
+  const map = new Map<string, number>();
+  for (const r of rows) {
+    const key4 = `${r.tipo_gasto}||${r.detalle_gasto}||${r.nombre_cuenta}||${r.tercero_nombre}||${r.nit}`;
+    map.set(key4, (map.get(key4) ?? 0) + (Number(r.gasto_real) || 0));
+  }
+  const n1Map = new Map<string, Nivel1>();
+  for (const [key, valor] of map.entries()) {
+    const [tipo, detalle, nombre, tercero, nit] = key.split("||");
+    if (!n1Map.has(tipo)) n1Map.set(tipo, { tipo_gasto: tipo, valor: 0, detalles: [] });
+    const n1 = n1Map.get(tipo)!;
+    n1.valor += valor;
+    let n2 = n1.detalles.find((d) => d.detalle_gasto === detalle);
+    if (!n2) { n2 = { detalle_gasto: detalle, valor: 0, cuentas: [] }; n1.detalles.push(n2); }
+    n2.valor += valor;
+    let n3 = n2.cuentas.find((c) => c.nombre_cuenta === nombre);
+    if (!n3) { n3 = { nombre_cuenta: nombre, valor: 0, terceros: [] }; n2.cuentas.push(n3); }
+    n3.valor += valor;
+    n3.terceros.push({ tercero, nit, valor });
+  }
+  return Array.from(n1Map.values())
+    .sort((a, b) => a.tipo_gasto.localeCompare(b.tipo_gasto))
+    .map((n1) => ({
+      ...n1,
+      detalles: n1.detalles
+        .sort((a, b) => a.detalle_gasto.localeCompare(b.detalle_gasto))
+        .map((n2) => ({
+          ...n2,
+          cuentas: n2.cuentas
+            .sort((a, b) => a.nombre_cuenta.localeCompare(b.nombre_cuenta))
+            .map((n3) => ({
+              ...n3,
+              terceros: n3.terceros.sort((a, b) => b.valor - a.valor),
+            })),
+        })),
+    }));
+}
+
+function TabDetalleTercero({ filtros }: { filtros: FiltroDashboard }) {
+  const [ccActivo, setCcActivo] = useState("TODOS");
+  const gastos = useGastosTercero({
+    año: filtros.año,
+    mes: filtros.mes,
+    compania: filtros.compania,
+    ccKey: ccActivo,
+  });
+
+  const tree = useMemo(() => buildTree(gastos.data ?? []), [gastos.data]);
+
+  const [openN1, setOpenN1] = useState<Set<string>>(new Set());
+  const [openN2, setOpenN2] = useState<Set<string>>(new Set());
+  const [openN3, setOpenN3] = useState<Set<string>>(new Set());
+
+  const toggle = (setter: React.Dispatch<React.SetStateAction<Set<string>>>) => (k: string) =>
+    setter((prev) => {
+      const s = new Set(prev);
+      if (s.has(k)) s.delete(k); else s.add(k);
+      return s;
+    });
+  const toggleN1 = toggle(setOpenN1);
+  const toggleN2 = toggle(setOpenN2);
+  const toggleN3 = toggle(setOpenN3);
+
+  const expandAll = () => {
+    setOpenN1(new Set(tree.map((n) => n.tipo_gasto)));
+    setOpenN2(new Set(tree.flatMap((n) => n.detalles.map((d) => `${n.tipo_gasto}||${d.detalle_gasto}`))));
+    setOpenN3(new Set(tree.flatMap((n) => n.detalles.flatMap((d) =>
+      d.cuentas.map((c) => `${n.tipo_gasto}||${d.detalle_gasto}||${c.nombre_cuenta}`)
+    ))));
+  };
+  const collapseAll = () => { setOpenN1(new Set()); setOpenN2(new Set()); setOpenN3(new Set()); };
+
+  const totalGeneral = tree.reduce((s, n) => s + n.valor, 0);
+
+  return (
+    <div>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-2">
+          {CENTROS.map((cc) => (
+            <button
+              key={cc.key}
+              onClick={() => setCcActivo(cc.key)}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+                ccActivo === cc.key
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              }`}
+            >
+              {cc.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <button onClick={expandAll} className="rounded-md border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">Expandir todo</button>
+          <button onClick={collapseAll} className="rounded-md border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">Contraer todo</button>
+        </div>
+      </div>
+
+      {gastos.isLoading ? (
+        <div className="space-y-1">{Array.from({ length: 8 }).map((_, i) => (
+          <div key={i} className="h-8 animate-pulse rounded bg-muted/40" />
+        ))}</div>
+      ) : gastos.isError ? (
+        <ErrorState />
+      ) : tree.length === 0 ? (
+        <div className="py-12 text-center text-sm text-muted-foreground">Sin datos para los filtros seleccionados</div>
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-border">
+          <div className="grid grid-cols-[1fr_auto] gap-4 border-b border-border bg-card px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <span>Concepto</span>
+            <span className="min-w-[120px] text-right">Valor</span>
+          </div>
+          <div className="divide-y divide-border/30">
+            {tree.map((n1) => {
+              const k1 = n1.tipo_gasto;
+              const isOpen1 = openN1.has(k1);
+              const fN1 = formatCell(n1.valor);
+              return (
+                <div key={k1}>
+                  <div
+                    className="grid cursor-pointer select-none grid-cols-[1fr_auto] gap-4 px-3 py-2 transition-colors hover:bg-muted/20"
+                    style={{ background: "#1e2d42" }}
+                    onClick={() => toggleN1(k1)}
+                  >
+                    <div className="flex items-center gap-2 text-[11px] font-bold text-foreground">
+                      <span className="w-3 flex-shrink-0 text-center text-muted-foreground">{isOpen1 ? "▼" : "▶"}</span>
+                      {n1.tipo_gasto}
+                    </div>
+                    <div className={`min-w-[120px] text-right text-[11px] font-bold tabular-nums ${fN1.negative ? "text-destructive" : "text-foreground"}`}>{fN1.text}</div>
+                  </div>
+                  {isOpen1 && n1.detalles.map((n2) => {
+                    const k2 = `${k1}||${n2.detalle_gasto}`;
+                    const isOpen2 = openN2.has(k2);
+                    const fN2 = formatCell(n2.valor);
+                    return (
+                      <div key={k2}>
+                        <div
+                          className="grid cursor-pointer select-none grid-cols-[1fr_auto] gap-4 px-3 py-1.5 transition-colors hover:bg-muted/20"
+                          style={{ background: "#151f33" }}
+                          onClick={() => toggleN2(k2)}
+                        >
+                          <div className="flex items-center gap-2 pl-5 text-[11px] font-semibold text-foreground">
+                            <span className="w-3 flex-shrink-0 text-center text-muted-foreground">{isOpen2 ? "▼" : "▶"}</span>
+                            {n2.detalle_gasto}
+                          </div>
+                          <div className={`min-w-[120px] text-right text-[11px] font-semibold tabular-nums ${fN2.negative ? "text-destructive" : "text-foreground"}`}>{fN2.text}</div>
+                        </div>
+                        {isOpen2 && n2.cuentas.map((n3) => {
+                          const k3 = `${k2}||${n3.nombre_cuenta}`;
+                          const isOpen3 = openN3.has(k3);
+                          const fN3 = formatCell(n3.valor);
+                          return (
+                            <div key={k3}>
+                              <div
+                                className="grid cursor-pointer select-none grid-cols-[1fr_auto] gap-4 px-3 py-1.5 transition-colors hover:bg-muted/10"
+                                onClick={() => toggleN3(k3)}
+                              >
+                                <div className="flex items-center gap-2 pl-10 text-[11px] text-muted-foreground">
+                                  <span className="w-3 flex-shrink-0 text-center text-muted-foreground/60">{isOpen3 ? "▾" : "▸"}</span>
+                                  {n3.nombre_cuenta}
+                                </div>
+                                <div className={`min-w-[120px] text-right text-[11px] tabular-nums ${fN3.negative ? "text-destructive" : "text-muted-foreground"}`}>{fN3.text}</div>
+                              </div>
+                              {isOpen3 && n3.terceros.map((t, ti) => {
+                                const fT = formatCell(t.valor);
+                                return (
+                                  <div
+                                    key={`${k3}||${t.nit}||${ti}`}
+                                    className="grid grid-cols-[1fr_auto] gap-4 border-b border-border/20 px-3 py-1 last:border-0"
+                                    style={{ background: "#080c18" }}
+                                  >
+                                    <div className="flex items-center gap-3 pl-16">
+                                      {t.nit && t.nit !== "SIN TERCERO" && (
+                                        <span className="flex-shrink-0 rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[9px] text-muted-foreground">{t.nit}</span>
+                                      )}
+                                      <span className="text-[11px] text-muted-foreground/80">{t.tercero}</span>
+                                    </div>
+                                    <div className={`min-w-[120px] text-right text-[11px] tabular-nums ${fT.negative ? "text-destructive" : "text-muted-foreground/70"}`}>{fT.text}</div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+          <div className="grid grid-cols-[1fr_auto] gap-4 border-t border-border bg-card px-3 py-2">
+            <span className="text-[11px] font-bold text-foreground">TOTAL GASTOS</span>
+            <span className={`min-w-[120px] text-right text-[11px] font-bold tabular-nums ${totalGeneral < 0 ? "text-destructive" : "text-foreground"}`}>{formatCell(totalGeneral).text}</span>
+          </div>
         </div>
       )}
     </div>
