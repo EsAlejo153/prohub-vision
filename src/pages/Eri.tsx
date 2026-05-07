@@ -5,6 +5,7 @@ import {
   useEri,
   usePlanPyg,
   useEriAllMonths,
+  useEriAllCC,
   useGastosPorCC,
   type GastoTerceroRow,
   type PlanPygRow,
@@ -73,7 +74,7 @@ export default function Eri() {
 
       {activeTab === "periodo" && <TabPeriodo plan={plan} filtros={filtros} />}
       {activeTab === "mes-a-mes" && <TabMesAMes plan={plan} filtros={filtros} />}
-      {activeTab === "por-cc" && <TabPorCC filtros={filtros} />}
+      {activeTab === "por-cc" && <TabPorCC plan={plan} filtros={filtros} />}
     </AppLayout>
   );
 }
@@ -290,14 +291,37 @@ function buildTreeCC(rows: GastoTerceroRow[]): Nivel1CC[] {
     }));
 }
 
-function TabPorCC({ filtros }: { filtros: FiltroDashboard }) {
+function TabPorCC({ plan, filtros }: TabProps) {
   const [mesLocal, setMesLocal] = useState<number | "Todos">("Todos");
   const gastos = useGastosPorCC({
     año: filtros.año,
     mes: mesLocal,
     compania: filtros.compania,
   });
+  const eriCC = useEriAllCC({
+    año: filtros.año,
+    compania: filtros.compania,
+    mes: mesLocal,
+  });
   const tree = useMemo(() => buildTreeCC(gastos.data ?? []), [gastos.data]);
+
+  const eriMap = useMemo(() => {
+    const m = new Map<number, Map<string, number>>();
+    for (const r of eriCC.data ?? []) {
+      let inner = m.get(r.orden);
+      if (!inner) { inner = new Map(); m.set(r.orden, inner); }
+      inner.set(r.cc_key, (inner.get(r.cc_key) ?? 0) + (Number(r.valor_pyg) || 0));
+    }
+    return m;
+  }, [eriCC.data]);
+
+  const getCCVals = (orden: number): ValoresPorCC => {
+    const inner = eriMap.get(orden);
+    if (!inner) return {};
+    const r: ValoresPorCC = {};
+    for (const [cc, v] of inner.entries()) r[cc] = v;
+    return r;
+  };
 
   const [openN1, setOpenN1] = useState<Set<string>>(new Set());
   const [openN2, setOpenN2] = useState<Set<string>>(new Set());
@@ -325,7 +349,42 @@ function TabPorCC({ filtros }: { filtros: FiltroDashboard }) {
   const getConsolidado = (vals: ValoresPorCC) =>
     CC_KEYS.reduce((s, cc) => s + (vals[cc.key] ?? 0), 0);
 
-  const totalConsolidado = tree.reduce((s, n) => s + getConsolidado(n.valores), 0);
+  const planRows: PlanPygRow[] = plan.data ?? [];
+  const ingresosCuentas = planRows.filter(
+    (r) => r.nivel === "Cuenta" && (r as any).clase_cod === "4" && (r as any).grupo_cod === "41"
+  );
+  const otrosIngresosCuentas = planRows.filter(
+    (r) => r.nivel === "Cuenta" && (r as any).clase_cod === "4" && (r as any).grupo_cod === "42"
+  );
+  const costosCuentas = planRows.filter(
+    (r) => r.nivel === "Cuenta" && (r as any).clase_cod === "6"
+  );
+
+  const vTotalIngresos = getCCVals(15);
+  const vTotalCostos = getCCVals(19);
+
+  const vUtilidadBruta: ValoresPorCC = {};
+  for (const cc of CC_KEYS) {
+    vUtilidadBruta[cc.key] = (vTotalIngresos[cc.key] ?? 0) - Math.abs(vTotalCostos[cc.key] ?? 0);
+  }
+
+  const gastosOperTree = tree.find((n) => n.tipo_gasto === "01.GASTOS OPERACIONALES");
+  const gastosNoOperTree = tree.find((n) => n.tipo_gasto === "02.GASTO NO OPERACIONAL");
+
+  const vGastosOper = gastosOperTree?.valores ?? {};
+  const vUtilidadOper: ValoresPorCC = {};
+  for (const cc of CC_KEYS) {
+    vUtilidadOper[cc.key] = (vUtilidadBruta[cc.key] ?? 0) - (vGastosOper[cc.key] ?? 0);
+  }
+
+  const vOtrosIngresos = getCCVals(37);
+  const vOtrosGastos = gastosNoOperTree?.valores ?? {};
+
+  const vUtilidadAI: ValoresPorCC = {};
+  for (const cc of CC_KEYS) {
+    vUtilidadAI[cc.key] =
+      (vUtilidadOper[cc.key] ?? 0) + (vOtrosIngresos[cc.key] ?? 0) - (vOtrosGastos[cc.key] ?? 0);
+  }
 
   const año = filtros.año === "Todas" ? 2026 : Number(filtros.año);
   const mesesDisponibles: { value: number | "Todos"; label: string }[] = [
@@ -336,7 +395,141 @@ function TabPorCC({ filtros }: { filtros: FiltroDashboard }) {
     })),
   ];
 
-  const colClass = "px-2 py-1.5 text-right text-[11px] tabular-nums whitespace-nowrap";
+  const colClass = "px-2 py-1.5 text-right text-[11px] tabular-nums whitespace-nowrap min-w-[110px]";
+
+  const renderCellVal = (vals: ValoresPorCC, cc: { key: string }, bold = false) => {
+    const f = formatCell(vals[cc.key] ?? 0);
+    return (
+      <td key={cc.key} className={`${colClass} ${bold ? "font-bold" : ""} ${f.negative ? "text-destructive" : f.zero ? "text-muted-foreground/30" : "text-foreground"}`}>{f.text}</td>
+    );
+  };
+  const renderConsCell = (vals: ValoresPorCC, bold = false) => {
+    const v = getConsolidado(vals);
+    const f = formatCell(v);
+    return (
+      <td className={`${colClass} ${bold ? "font-bold" : ""} ${f.negative ? "text-destructive" : f.zero ? "text-muted-foreground/30" : "text-primary"}`}>{f.text}</td>
+    );
+  };
+
+  const SectionHeader = ({ label }: { label: string }) => (
+    <tr style={{ background: "#1e2d42" }}>
+      <td colSpan={CC_KEYS.length + 2} className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-foreground">
+        {label}
+      </td>
+    </tr>
+  );
+
+  const EriCuentaRow = ({ row, idx }: { row: PlanPygRow; idx: number }) => {
+    const vals = getCCVals(row.orden);
+    return (
+      <tr className={`border-b border-border/20 ${idx % 2 === 0 ? "bg-background/10" : ""}`}>
+        <td className="px-3 py-1 pl-8 text-[11px] text-muted-foreground">{row.etiqueta_fila || row.concepto}</td>
+        {CC_KEYS.map((cc) => renderCellVal(vals, cc))}
+        {renderConsCell(vals)}
+      </tr>
+    );
+  };
+
+  const TotalRow = ({ label, vals }: { label: string; vals: ValoresPorCC }) => (
+    <tr className="border-b border-border" style={{ background: getConsolidado(vals) >= 0 ? "#1a2d1a" : "#2d1a1a" }}>
+      <td className="px-3 py-1.5 text-[11px] font-bold text-foreground">{label}</td>
+      {CC_KEYS.map((cc) => renderCellVal(vals, cc, true))}
+      {renderConsCell(vals, true)}
+    </tr>
+  );
+
+  const SubtotalRow = ({ label, vals }: { label: string; vals: ValoresPorCC }) => (
+    <tr className="border-b border-border border-l-2 border-l-primary" style={{ background: "#0d2040" }}>
+      <td className="px-3 py-2 text-[12px] font-bold text-foreground">{label}</td>
+      {CC_KEYS.map((cc) => renderCellVal(vals, cc, true))}
+      {renderConsCell(vals, true)}
+    </tr>
+  );
+
+  const renderGastosTree = (n1: Nivel1CC) => {
+    const k1 = n1.tipo_gasto;
+    const isOpen1 = openN1.has(k1);
+    return (
+      <Fragment key={k1}>
+        <tr
+          className="cursor-pointer border-b border-border/40 hover:opacity-90"
+          style={{ background: "#151f33" }}
+          onClick={() => toggleN1(k1)}
+        >
+          <td className="px-3 py-1.5 pl-5 text-[11px] font-semibold text-foreground">
+            <span className="mr-2 text-[10px] text-muted-foreground">{isOpen1 ? "▼" : "▶"}</span>
+            {n1.tipo_gasto}
+          </td>
+          {CC_KEYS.map((cc) => renderCellVal(n1.valores, cc, true))}
+          {renderConsCell(n1.valores, true)}
+        </tr>
+        {isOpen1 && n1.detalles.map((n2) => {
+          const k2 = `${k1}||${n2.detalle_gasto}`;
+          const isOpen2 = openN2.has(k2);
+          return (
+            <Fragment key={k2}>
+              <tr
+                className="cursor-pointer border-b border-border/30 hover:opacity-90"
+                style={{ background: "#0d1525" }}
+                onClick={() => toggleN2(k2)}
+              >
+                <td className="px-3 py-1.5 pl-10 text-[11px] text-muted-foreground">
+                  <span className="mr-2 text-[10px] text-muted-foreground/60">{isOpen2 ? "▾" : "▸"}</span>
+                  {n2.detalle_gasto}
+                </td>
+                {CC_KEYS.map((cc) => renderCellVal(n2.valores, cc))}
+                {renderConsCell(n2.valores)}
+              </tr>
+              {isOpen2 && n2.cuentas.map((n3) => {
+                const k3 = `${k2}||${n3.nombre_cuenta}`;
+                const isOpen3 = openN3.has(k3);
+                return (
+                  <Fragment key={k3}>
+                    <tr
+                      className="cursor-pointer border-b border-border/10 hover:opacity-80"
+                      onClick={() => toggleN3(k3)}
+                    >
+                      <td className="px-3 py-1 pl-16 text-[11px] text-muted-foreground/80">
+                        <span className="mr-2 text-[10px] text-muted-foreground/40">{isOpen3 ? "▾" : "▸"}</span>
+                        {n3.nombre_cuenta}
+                      </td>
+                      {CC_KEYS.map((cc) => renderCellVal(n3.valores, cc))}
+                      {renderConsCell(n3.valores)}
+                    </tr>
+                    {isOpen3 && n3.terceros.map((t, ti) => {
+                      const consT = getConsolidado(t.valores);
+                      const fConsT = formatCell(consT);
+                      return (
+                        <tr key={`${k3}||${t.nit}||${ti}`} className="border-b border-border/10" style={{ background: "#080c18" }}>
+                          <td className="px-3 py-0.5 pl-20">
+                            <div className="flex items-center gap-2">
+                              {t.nit && t.nit !== "SIN TERCERO" && (
+                                <span className="flex-shrink-0 rounded bg-muted/40 px-1 font-mono text-[9px] text-muted-foreground">{t.nit}</span>
+                              )}
+                              <span className="text-[10px] text-muted-foreground/60">{t.tercero}</span>
+                            </div>
+                          </td>
+                          {CC_KEYS.map((cc) => {
+                            const f = formatCell(t.valores[cc.key] ?? 0);
+                            return (
+                              <td key={cc.key} className={`${colClass} text-[10px] ${f.negative ? "text-destructive" : f.zero ? "text-muted-foreground/20" : "text-muted-foreground/50"}`}>{f.text}</td>
+                            );
+                          })}
+                          <td className={`${colClass} text-[10px] ${fConsT.negative ? "text-destructive" : "text-muted-foreground/50"}`}>{fConsT.text}</td>
+                        </tr>
+                      );
+                    })}
+                  </Fragment>
+                );
+              })}
+            </Fragment>
+          );
+        })}
+      </Fragment>
+    );
+  };
+
+  const isLoading = plan.isLoading || gastos.isLoading || eriCC.isLoading;
 
   return (
     <div>
@@ -363,14 +556,12 @@ function TabPorCC({ filtros }: { filtros: FiltroDashboard }) {
         </div>
       </div>
 
-      {gastos.isLoading ? (
+      {isLoading ? (
         <div className="space-y-1">{Array.from({ length: 8 }).map((_, i) => (
           <div key={i} className="h-8 animate-pulse rounded bg-muted/40" />
         ))}</div>
-      ) : gastos.isError ? (
+      ) : gastos.isError || eriCC.isError || plan.isError ? (
         <ErrorState />
-      ) : tree.length === 0 ? (
-        <div className="py-12 text-center text-sm text-muted-foreground">Sin datos para los filtros seleccionados</div>
       ) : (
         <div className="overflow-auto rounded-lg border border-border">
           <table className="w-full border-collapse text-[11px]">
@@ -386,127 +577,30 @@ function TabPorCC({ filtros }: { filtros: FiltroDashboard }) {
               </tr>
             </thead>
             <tbody>
-              {tree.map((n1) => {
-                const k1 = n1.tipo_gasto;
-                const isOpen1 = openN1.has(k1);
-                const cons1 = getConsolidado(n1.valores);
-                const fCons1 = formatCell(cons1);
-                return (
-                  <Fragment key={k1}>
-                    <tr
-                      className="cursor-pointer border-b border-border/40 hover:opacity-90"
-                      style={{ background: "#1e2d42" }}
-                      onClick={() => toggleN1(k1)}
-                    >
-                      <td className="px-3 py-2 font-bold text-foreground">
-                        <span className="mr-2 text-muted-foreground">{isOpen1 ? "▼" : "▶"}</span>
-                        {n1.tipo_gasto}
-                      </td>
-                      {CC_KEYS.map((cc) => {
-                        const f = formatCell(n1.valores[cc.key] ?? 0);
-                        return (
-                          <td key={cc.key} className={`${colClass} font-bold ${f.negative ? "text-destructive" : f.zero ? "text-muted-foreground/40" : "text-foreground"}`}>{f.text}</td>
-                        );
-                      })}
-                      <td className={`${colClass} font-bold ${fCons1.negative ? "text-destructive" : "text-foreground"}`}>{fCons1.text}</td>
-                    </tr>
-                    {isOpen1 && n1.detalles.map((n2) => {
-                      const k2 = `${k1}||${n2.detalle_gasto}`;
-                      const isOpen2 = openN2.has(k2);
-                      const cons2 = getConsolidado(n2.valores);
-                      const fCons2 = formatCell(cons2);
-                      return (
-                        <Fragment key={k2}>
-                          <tr
-                            className="cursor-pointer border-b border-border/30 hover:opacity-90"
-                            style={{ background: "#151f33" }}
-                            onClick={() => toggleN2(k2)}
-                          >
-                            <td className="px-3 py-1.5 pl-8 font-semibold text-foreground">
-                              <span className="mr-2 text-muted-foreground">{isOpen2 ? "▼" : "▶"}</span>
-                              {n2.detalle_gasto}
-                            </td>
-                            {CC_KEYS.map((cc) => {
-                              const f = formatCell(n2.valores[cc.key] ?? 0);
-                              return (
-                                <td key={cc.key} className={`${colClass} font-semibold ${f.negative ? "text-destructive" : f.zero ? "text-muted-foreground/40" : "text-foreground"}`}>{f.text}</td>
-                              );
-                            })}
-                            <td className={`${colClass} font-semibold ${fCons2.negative ? "text-destructive" : "text-foreground"}`}>{fCons2.text}</td>
-                          </tr>
-                          {isOpen2 && n2.cuentas.map((n3) => {
-                            const k3 = `${k2}||${n3.nombre_cuenta}`;
-                            const isOpen3 = openN3.has(k3);
-                            const cons3 = getConsolidado(n3.valores);
-                            const fCons3 = formatCell(cons3);
-                            return (
-                              <Fragment key={k3}>
-                                <tr
-                                  className="cursor-pointer border-b border-border/20 hover:opacity-80"
-                                  onClick={() => toggleN3(k3)}
-                                >
-                                  <td className="px-3 py-1.5 pl-14 text-muted-foreground">
-                                    <span className="mr-2 text-muted-foreground/60">{isOpen3 ? "▾" : "▸"}</span>
-                                    {n3.nombre_cuenta}
-                                  </td>
-                                  {CC_KEYS.map((cc) => {
-                                    const f = formatCell(n3.valores[cc.key] ?? 0);
-                                    return (
-                                      <td key={cc.key} className={`${colClass} ${f.negative ? "text-destructive" : f.zero ? "text-muted-foreground/30" : "text-muted-foreground"}`}>{f.text}</td>
-                                    );
-                                  })}
-                                  <td className={`${colClass} ${fCons3.negative ? "text-destructive" : "text-muted-foreground"}`}>{fCons3.text}</td>
-                                </tr>
-                                {isOpen3 && n3.terceros.map((t, ti) => {
-                                  const consT = getConsolidado(t.valores);
-                                  const fConsT = formatCell(consT);
-                                  return (
-                                    <tr
-                                      key={`${k3}||${t.nit}||${ti}`}
-                                      className="border-b border-border/10"
-                                      style={{ background: "#080c18" }}
-                                    >
-                                      <td className="px-3 py-1 pl-20">
-                                        <div className="flex items-center gap-2">
-                                          {t.nit && t.nit !== "SIN TERCERO" && (
-                                            <span className="flex-shrink-0 rounded bg-muted/60 px-1 py-0.5 font-mono text-[9px] text-muted-foreground">{t.nit}</span>
-                                          )}
-                                          <span className="text-[11px] text-muted-foreground/70">{t.tercero}</span>
-                                        </div>
-                                      </td>
-                                      {CC_KEYS.map((cc) => {
-                                        const f = formatCell(t.valores[cc.key] ?? 0);
-                                        return (
-                                          <td key={cc.key} className={`${colClass} ${f.negative ? "text-destructive" : f.zero ? "text-muted-foreground/20" : "text-muted-foreground/60"}`}>{f.text}</td>
-                                        );
-                                      })}
-                                      <td className={`${colClass} ${fConsT.negative ? "text-destructive" : "text-muted-foreground/60"}`}>{fConsT.text}</td>
-                                    </tr>
-                                  );
-                                })}
-                              </Fragment>
-                            );
-                          })}
-                        </Fragment>
-                      );
-                    })}
-                  </Fragment>
-                );
-              })}
+              <SectionHeader label="INGRESOS OPERACIONALES" />
+              {ingresosCuentas.map((row, i) => <EriCuentaRow key={row.orden} row={row} idx={i} />)}
+              <TotalRow label="TOTAL INGRESOS OPERACIONALES" vals={vTotalIngresos} />
+
+              <SectionHeader label="COSTOS DE VENTAS" />
+              {costosCuentas.map((row, i) => <EriCuentaRow key={row.orden} row={row} idx={i} />)}
+              <TotalRow label="TOTAL COSTOS" vals={vTotalCostos} />
+
+              <SubtotalRow label="UTILIDAD BRUTA" vals={vUtilidadBruta} />
+
+              <SectionHeader label="GASTOS OPERACIONALES" />
+              {gastosOperTree && renderGastosTree(gastosOperTree)}
+
+              <SubtotalRow label="UTILIDAD OPERACIONAL" vals={vUtilidadOper} />
+
+              <SectionHeader label="OTROS INGRESOS" />
+              {otrosIngresosCuentas.map((row, i) => <EriCuentaRow key={row.orden} row={row} idx={i} />)}
+              <TotalRow label="TOTAL OTROS INGRESOS" vals={vOtrosIngresos} />
+
+              <SectionHeader label="OTROS GASTOS" />
+              {gastosNoOperTree && renderGastosTree(gastosNoOperTree)}
+
+              <SubtotalRow label="UTILIDAD ANTES DE IMPUESTOS" vals={vUtilidadAI} />
             </tbody>
-            <tfoot>
-              <tr className="border-t-2 border-border bg-card">
-                <td className="px-3 py-2 text-[11px] font-bold text-foreground">TOTAL GASTOS</td>
-                {CC_KEYS.map((cc) => {
-                  const total = tree.reduce((s, n) => s + (n.valores[cc.key] ?? 0), 0);
-                  const f = formatCell(total);
-                  return (
-                    <td key={cc.key} className={`${colClass} font-bold ${f.negative ? "text-destructive" : "text-foreground"}`}>{f.text}</td>
-                  );
-                })}
-                {(() => { const f = formatCell(totalConsolidado); return <td className={`${colClass} font-bold text-primary`}>{f.text}</td>; })()}
-              </tr>
-            </tfoot>
           </table>
         </div>
       )}
