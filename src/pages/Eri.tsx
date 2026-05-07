@@ -328,6 +328,11 @@ function TabPorCC({ plan, filtros }: TabProps) {
   const [openN2, setOpenN2] = useState<Set<string>>(new Set());
   const [openN3, setOpenN3] = useState<Set<string>>(new Set());
   const [openIngreso, setOpenIngreso] = useState<Set<number>>(new Set());
+  const [openSections, setOpenSections] = useState<Set<string>>(
+    new Set(['ingresos', 'costos', 'otros-ingresos', 'gastos-oper', 'otros-gastos'])
+  );
+  const toggleSection = (k: string) =>
+    setOpenSections(prev => { const s = new Set(prev); s.has(k) ? s.delete(k) : s.add(k); return s; });
   const toggleIngreso = (orden: number) =>
     setOpenIngreso(prev => { const s = new Set(prev); s.has(orden) ? s.delete(orden) : s.add(orden); return s; });
 
@@ -355,13 +360,14 @@ function TabPorCC({ plan, filtros }: TabProps) {
   const toggleN3 = toggle(setOpenN3);
 
   const expandAll = () => {
+    setOpenSections(new Set(['ingresos','costos','otros-ingresos','gastos-oper','otros-gastos']));
     setOpenN1(new Set(tree.map((n) => n.tipo_gasto)));
     setOpenN2(new Set(tree.flatMap((n) => n.detalles.map((d) => `${n.tipo_gasto}||${d.detalle_gasto}`))));
     setOpenN3(new Set(tree.flatMap((n) => n.detalles.flatMap((d) =>
       d.cuentas.map((c) => `${n.tipo_gasto}||${d.detalle_gasto}||${c.nombre_cuenta}`)
     ))));
   };
-  const collapseAll = () => { setOpenN1(new Set()); setOpenN2(new Set()); setOpenN3(new Set()); };
+  const collapseAll = () => { setOpenSections(new Set()); setOpenN1(new Set()); setOpenN2(new Set()); setOpenN3(new Set()); };
 
   const getConsolidado = (vals: ValoresPorCC) =>
     CC_KEYS.reduce((s, cc) => s + (vals[cc.key] ?? 0), 0);
@@ -457,34 +463,46 @@ function TabPorCC({ plan, filtros }: TabProps) {
     );
   };
   const renderCCPct = (vals: ValoresPorCC, cc: { key: string }, bold = false) => {
-    const ccIngreso = vTotalIngresos[cc.key] || 1;
+    const ccIngreso = vTotalIngresos[cc.key] ?? 0;
     const v = vals[cc.key] ?? 0;
-    if (!v) return <td className="px-2 py-1.5 text-right text-[10px] text-muted-foreground/20 whitespace-nowrap min-w-[55px]">-</td>;
+    if (!v || !ccIngreso) return (
+      <td className="px-2 py-1.5 text-right text-[10px] text-muted-foreground/20 whitespace-nowrap min-w-[55px]">-</td>
+    );
     const pct = (v / ccIngreso) * 100;
     return (
-      <td className={`px-2 py-1.5 text-right text-[10px] tabular-nums whitespace-nowrap min-w-[55px] ${bold ? 'font-bold' : ''} text-muted-foreground/60`}>
+      <td className={`px-2 py-1.5 text-right text-[10px] tabular-nums whitespace-nowrap min-w-[55px] ${bold ? 'font-bold' : ''} text-muted-foreground/70`}>
         {pct.toFixed(2)}%
       </td>
     );
   };
   const renderConsPct = (vals: ValoresPorCC, bold = false) => {
     const v = getConsolidado(vals);
-    if (!v) return <td className="px-2 py-1.5 text-right text-[10px] text-muted-foreground/20 whitespace-nowrap min-w-[60px]">-</td>;
+    if (!v || !totalIngresos) return (
+      <td className="px-2 py-1.5 text-right text-[10px] text-muted-foreground/20 whitespace-nowrap min-w-[60px]">-</td>
+    );
     const pct = (v / totalIngresos) * 100;
     return (
-      <td className={`px-2 py-1.5 text-right text-[10px] tabular-nums whitespace-nowrap min-w-[60px] ${bold ? 'font-bold text-primary/80' : 'text-muted-foreground/60'}`}>
+      <td className={`px-2 py-1.5 text-right text-[10px] tabular-nums whitespace-nowrap min-w-[60px] ${bold ? 'font-bold' : ''} text-muted-foreground/70`}>
         {pct.toFixed(2)}%
       </td>
     );
   };
 
-  const SectionHeader = ({ label }: { label: string }) => (
-    <tr style={{ background: "#1e2d42" }}>
-      <td colSpan={CC_KEYS.length * 2 + 2} className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-foreground">
-        {label}
-      </td>
-    </tr>
-  );
+  const SectionHeader = ({ label, sectionKey }: { label: string; sectionKey: string }) => {
+    const isOpen = openSections.has(sectionKey);
+    return (
+      <tr
+        style={{ background: "#1e2d42" }}
+        className="cursor-pointer hover:opacity-90"
+        onClick={() => toggleSection(sectionKey)}
+      >
+        <td colSpan={CC_KEYS.length * 2 + 2} className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-foreground">
+          <span className="mr-2 text-[10px] text-muted-foreground">{isOpen ? "▼" : "▶"}</span>
+          {label}
+        </td>
+      </tr>
+    );
+  };
 
   const EriCuentaRow = ({ row, idx }: { row: PlanPygRow; idx: number }) => {
     const vals = getCCVals(row.orden);
@@ -706,37 +724,35 @@ function TabPorCC({ plan, filtros }: TabProps) {
                     <th className="min-w-[110px] whitespace-nowrap px-2 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                       {cc.label}
                     </th>
-                    <th className="min-w-[55px] whitespace-nowrap px-2 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-                      %
-                    </th>
+                    <th className="min-w-[55px] whitespace-nowrap px-2 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">%</th>
                   </Fragment>
                 ))}
                 <th className="min-w-[120px] whitespace-nowrap px-2 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-primary">Consolidado</th>
-                <th className="min-w-[60px] whitespace-nowrap px-2 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-primary/60">%</th>
+                <th className="min-w-[60px] whitespace-nowrap px-2 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">%</th>
               </tr>
             </thead>
             <tbody>
-              <SectionHeader label="INGRESOS OPERACIONALES" />
-              {ingresosCuentas.map((row, i) => <EriCuentaRow key={row.orden} row={row} idx={i} />)}
-              <TotalRow label="TOTAL INGRESOS OPERACIONALES" vals={vTotalIngresos} />
+              <SectionHeader label="INGRESOS OPERACIONALES" sectionKey="ingresos" />
+              {openSections.has('ingresos') && ingresosCuentas.map((row, i) => <EriCuentaRow key={row.orden} row={row} idx={i} />)}
+              {openSections.has('ingresos') && <TotalRow label="TOTAL INGRESOS OPERACIONALES" vals={vTotalIngresos} />}
 
-              <SectionHeader label="COSTOS DE VENTAS" />
-              {costosCuentas.map((row, i) => <EriCuentaRow key={row.orden} row={row} idx={i} />)}
-              <TotalRow label="TOTAL COSTOS" vals={vTotalCostos} />
+              <SectionHeader label="COSTOS DE VENTAS" sectionKey="costos" />
+              {openSections.has('costos') && costosCuentas.map((row, i) => <EriCuentaRow key={row.orden} row={row} idx={i} />)}
+              {openSections.has('costos') && <TotalRow label="TOTAL COSTOS" vals={vTotalCostos} />}
 
               <SubtotalRow label="UTILIDAD BRUTA" vals={vUtilidadBruta} />
 
-              <SectionHeader label="GASTOS OPERACIONALES" />
-              {gastosOperTree && renderGastosTree(gastosOperTree)}
+              <SectionHeader label="GASTOS OPERACIONALES" sectionKey="gastos-oper" />
+              {openSections.has('gastos-oper') && gastosOperTree && renderGastosTree(gastosOperTree)}
 
               <SubtotalRow label="UTILIDAD OPERACIONAL" vals={vUtilidadOper} />
 
-              <SectionHeader label="OTROS INGRESOS" />
-              {otrosIngresosCuentas.map((row, i) => <EriCuentaRow key={row.orden} row={row} idx={i} />)}
-              <TotalRow label="TOTAL OTROS INGRESOS" vals={vOtrosIngresos} />
+              <SectionHeader label="OTROS INGRESOS" sectionKey="otros-ingresos" />
+              {openSections.has('otros-ingresos') && otrosIngresosCuentas.map((row, i) => <EriCuentaRow key={row.orden} row={row} idx={i} />)}
+              {openSections.has('otros-ingresos') && <TotalRow label="TOTAL OTROS INGRESOS" vals={vOtrosIngresos} />}
 
-              <SectionHeader label="OTROS GASTOS" />
-              {gastosNoOperTree && renderGastosTree(gastosNoOperTree)}
+              <SectionHeader label="OTROS GASTOS" sectionKey="otros-gastos" />
+              {openSections.has('otros-gastos') && gastosNoOperTree && renderGastosTree(gastosNoOperTree)}
 
               <SubtotalRow label="UTILIDAD ANTES DE IMPUESTOS" vals={vUtilidadAI} />
             </tbody>
