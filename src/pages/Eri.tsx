@@ -296,6 +296,74 @@ function TabMesAMes({ plan, filtros }: TabProps) {
     }
 
     const months = Array.from(monthSet).sort((a, b) => a - b);
+
+    // Calcular valores para filas Total y Subtotal (no vienen de v_eri_por_mes)
+    const sumByGrupoTitulo = (gt: string): Map<number, number> => {
+      const acc = new Map<number, number>();
+      for (const r of planRows) {
+        if (r.nivel !== "Cuenta" || r.grupo_titulo !== gt) continue;
+        const inner = valueMap.get(r.orden);
+        if (!inner) continue;
+        for (const [m, v] of inner) acc.set(m, (acc.get(m) ?? 0) + v);
+      }
+      return acc;
+    };
+    const sumByPredicate = (pred: (r: PlanPygRow) => boolean): Map<number, number> => {
+      const acc = new Map<number, number>();
+      for (const r of planRows) {
+        if (r.nivel !== "Cuenta" || !pred(r)) continue;
+        const inner = valueMap.get(r.orden);
+        if (!inner) continue;
+        for (const [m, v] of inner) acc.set(m, (acc.get(m) ?? 0) + v);
+      }
+      return acc;
+    };
+    const addMaps = (...maps: Map<number, number>[]) => {
+      const out = new Map<number, number>();
+      for (const mp of maps) for (const [m, v] of mp) out.set(m, (out.get(m) ?? 0) + v);
+      return out;
+    };
+    const subMaps = (a: Map<number, number>, b: Map<number, number>) => {
+      const out = new Map<number, number>();
+      for (const [m, v] of a) out.set(m, v);
+      for (const [m, v] of b) out.set(m, (out.get(m) ?? 0) - v);
+      return out;
+    };
+
+    // Buckets globales
+    const mIngresosOp = sumByPredicate((r) => String((r as any).clase_cod) === "4" && String((r as any).grupo_cod) === "41");
+    const mOtrosIng = sumByPredicate((r) => String((r as any).clase_cod) === "4" && String((r as any).grupo_cod) === "42");
+    const mCostos = sumByPredicate((r) => String((r as any).clase_cod) === "6");
+    const mGastosOper = sumByPredicate((r) => {
+      const cc = String((r as any).clase_cod);
+      const gt = (r.grupo_titulo || "").toUpperCase();
+      return cc === "5" && !gt.includes("NO OPERACIONAL");
+    });
+    const mOtrosGastos = sumByPredicate((r) => {
+      const cc = String((r as any).clase_cod);
+      const gt = (r.grupo_titulo || "").toUpperCase();
+      return cc === "5" && gt.includes("NO OPERACIONAL");
+    });
+
+    const mUtilBruta = addMaps(mIngresosOp, mCostos);
+    const mUtilOper = subMaps(mUtilBruta, mGastosOper);
+    const mUtilAI = subMaps(addMaps(mUtilOper, mOtrosIng), mOtrosGastos);
+
+    // Asignar Totales por grupo_titulo y Subtotales por etiqueta
+    for (const r of planRows) {
+      if (r.nivel === "Total") {
+        valueMap.set(r.orden, sumByGrupoTitulo(r.grupo_titulo));
+      } else if (r.nivel === "Subtotal") {
+        const et = (r.etiqueta_fila || r.concepto || "").toUpperCase();
+        let m: Map<number, number> | null = null;
+        if (et.includes("UTILIDAD BRUTA")) m = mUtilBruta;
+        else if (et.includes("UTILIDAD OPERACIONAL")) m = mUtilOper;
+        else if (et.includes("UTILIDAD ANTES")) m = mUtilAI;
+        else if (et.includes("UTILIDAD NETA")) m = mUtilAI;
+        if (m) valueMap.set(r.orden, m);
+      }
+    }
+
     return { planRows, valueMap, terceroMap, months };
   }, [plan.data, eriAll.data]);
 
@@ -469,6 +537,9 @@ function TabMesAMes({ plan, filtros }: TabProps) {
               {planRows.map((row, idx) => {
                 const total = getTotal(row.orden);
                 const monthVals = getMonthVals(row.orden);
+                if (row.nivel === "Cuenta" && total === 0 && monthVals.every((v) => v === 0)) {
+                  return null;
+                }
                 const { rowStyle, rowClass, isTitulo } = rowStyling(row.nivel, total, idx);
                 const isCuenta = row.nivel === "Cuenta";
                 const isOpen = openRows.has(row.orden);
