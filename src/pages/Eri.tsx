@@ -395,7 +395,141 @@ function TabPorCC({ plan, filtros }: TabProps) {
     })),
   ];
 
-  const colClass = "px-2 py-1.5 text-right text-[11px] tabular-nums whitespace-nowrap";
+  const colClass = "px-2 py-1.5 text-right text-[11px] tabular-nums whitespace-nowrap min-w-[110px]";
+
+  const renderCellVal = (vals: ValoresPorCC, cc: { key: string }, bold = false) => {
+    const f = formatCell(vals[cc.key] ?? 0);
+    return (
+      <td key={cc.key} className={`${colClass} ${bold ? "font-bold" : ""} ${f.negative ? "text-destructive" : f.zero ? "text-muted-foreground/30" : "text-foreground"}`}>{f.text}</td>
+    );
+  };
+  const renderConsCell = (vals: ValoresPorCC, bold = false) => {
+    const v = getConsolidado(vals);
+    const f = formatCell(v);
+    return (
+      <td className={`${colClass} ${bold ? "font-bold" : ""} ${f.negative ? "text-destructive" : f.zero ? "text-muted-foreground/30" : "text-primary"}`}>{f.text}</td>
+    );
+  };
+
+  const SectionHeader = ({ label }: { label: string }) => (
+    <tr style={{ background: "#1e2d42" }}>
+      <td colSpan={CC_KEYS.length + 2} className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-foreground">
+        {label}
+      </td>
+    </tr>
+  );
+
+  const EriCuentaRow = ({ row, idx }: { row: PlanPygRow; idx: number }) => {
+    const vals = getCCVals(row.orden);
+    return (
+      <tr className={`border-b border-border/20 ${idx % 2 === 0 ? "bg-background/10" : ""}`}>
+        <td className="px-3 py-1 pl-8 text-[11px] text-muted-foreground">{row.etiqueta_fila || row.concepto}</td>
+        {CC_KEYS.map((cc) => renderCellVal(vals, cc))}
+        {renderConsCell(vals)}
+      </tr>
+    );
+  };
+
+  const TotalRow = ({ label, vals }: { label: string; vals: ValoresPorCC }) => (
+    <tr className="border-b border-border" style={{ background: getConsolidado(vals) >= 0 ? "#1a2d1a" : "#2d1a1a" }}>
+      <td className="px-3 py-1.5 text-[11px] font-bold text-foreground">{label}</td>
+      {CC_KEYS.map((cc) => renderCellVal(vals, cc, true))}
+      {renderConsCell(vals, true)}
+    </tr>
+  );
+
+  const SubtotalRow = ({ label, vals }: { label: string; vals: ValoresPorCC }) => (
+    <tr className="border-b border-border border-l-2 border-l-primary" style={{ background: "#0d2040" }}>
+      <td className="px-3 py-2 text-[12px] font-bold text-foreground">{label}</td>
+      {CC_KEYS.map((cc) => renderCellVal(vals, cc, true))}
+      {renderConsCell(vals, true)}
+    </tr>
+  );
+
+  const renderGastosTree = (n1: Nivel1CC) => {
+    const k1 = n1.tipo_gasto;
+    const isOpen1 = openN1.has(k1);
+    return (
+      <Fragment key={k1}>
+        <tr
+          className="cursor-pointer border-b border-border/40 hover:opacity-90"
+          style={{ background: "#151f33" }}
+          onClick={() => toggleN1(k1)}
+        >
+          <td className="px-3 py-1.5 pl-5 text-[11px] font-semibold text-foreground">
+            <span className="mr-2 text-[10px] text-muted-foreground">{isOpen1 ? "▼" : "▶"}</span>
+            {n1.tipo_gasto}
+          </td>
+          {CC_KEYS.map((cc) => renderCellVal(n1.valores, cc, true))}
+          {renderConsCell(n1.valores, true)}
+        </tr>
+        {isOpen1 && n1.detalles.map((n2) => {
+          const k2 = `${k1}||${n2.detalle_gasto}`;
+          const isOpen2 = openN2.has(k2);
+          return (
+            <Fragment key={k2}>
+              <tr
+                className="cursor-pointer border-b border-border/30 hover:opacity-90"
+                style={{ background: "#0d1525" }}
+                onClick={() => toggleN2(k2)}
+              >
+                <td className="px-3 py-1.5 pl-10 text-[11px] text-muted-foreground">
+                  <span className="mr-2 text-[10px] text-muted-foreground/60">{isOpen2 ? "▾" : "▸"}</span>
+                  {n2.detalle_gasto}
+                </td>
+                {CC_KEYS.map((cc) => renderCellVal(n2.valores, cc))}
+                {renderConsCell(n2.valores)}
+              </tr>
+              {isOpen2 && n2.cuentas.map((n3) => {
+                const k3 = `${k2}||${n3.nombre_cuenta}`;
+                const isOpen3 = openN3.has(k3);
+                return (
+                  <Fragment key={k3}>
+                    <tr
+                      className="cursor-pointer border-b border-border/10 hover:opacity-80"
+                      onClick={() => toggleN3(k3)}
+                    >
+                      <td className="px-3 py-1 pl-16 text-[11px] text-muted-foreground/80">
+                        <span className="mr-2 text-[10px] text-muted-foreground/40">{isOpen3 ? "▾" : "▸"}</span>
+                        {n3.nombre_cuenta}
+                      </td>
+                      {CC_KEYS.map((cc) => renderCellVal(n3.valores, cc))}
+                      {renderConsCell(n3.valores)}
+                    </tr>
+                    {isOpen3 && n3.terceros.map((t, ti) => {
+                      const consT = getConsolidado(t.valores);
+                      const fConsT = formatCell(consT);
+                      return (
+                        <tr key={`${k3}||${t.nit}||${ti}`} className="border-b border-border/10" style={{ background: "#080c18" }}>
+                          <td className="px-3 py-0.5 pl-20">
+                            <div className="flex items-center gap-2">
+                              {t.nit && t.nit !== "SIN TERCERO" && (
+                                <span className="flex-shrink-0 rounded bg-muted/40 px-1 font-mono text-[9px] text-muted-foreground">{t.nit}</span>
+                              )}
+                              <span className="text-[10px] text-muted-foreground/60">{t.tercero}</span>
+                            </div>
+                          </td>
+                          {CC_KEYS.map((cc) => {
+                            const f = formatCell(t.valores[cc.key] ?? 0);
+                            return (
+                              <td key={cc.key} className={`${colClass} text-[10px] ${f.negative ? "text-destructive" : f.zero ? "text-muted-foreground/20" : "text-muted-foreground/50"}`}>{f.text}</td>
+                            );
+                          })}
+                          <td className={`${colClass} text-[10px] ${fConsT.negative ? "text-destructive" : "text-muted-foreground/50"}`}>{fConsT.text}</td>
+                        </tr>
+                      );
+                    })}
+                  </Fragment>
+                );
+              })}
+            </Fragment>
+          );
+        })}
+      </Fragment>
+    );
+  };
+
+  const isLoading = plan.isLoading || gastos.isLoading || eriCC.isLoading;
 
   return (
     <div>
