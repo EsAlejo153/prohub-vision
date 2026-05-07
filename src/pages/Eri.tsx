@@ -699,6 +699,7 @@ function TabMesAMes({ plan, filtros }: TabProps) {
                 <th className="whitespace-nowrap px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-primary">
                   Acumulado
                 </th>
+                <th className="min-w-[60px] whitespace-nowrap px-2 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">% Vert.</th>
               </tr>
             </thead>
             <tbody>
@@ -751,6 +752,12 @@ function TabMesAMes({ plan, filtros }: TabProps) {
                         );
                       })()
                     )}
+                    {isTitulo ? <td className="px-3 py-1.5" /> : (() => {
+                      const ingrTotal = valueMap.get(15);
+                      const ingAcum = months.reduce((s,m) => s + (ingrTotal?.get(m) ?? 0), 0) || 1;
+                      const pct = (total / ingAcum) * 100;
+                      return <td className="whitespace-nowrap px-3 py-1.5 text-right text-[10px] tabular-nums text-muted-foreground">{total !== 0 ? `${pct.toFixed(1)}%` : '-'}</td>;
+                    })()}
                   </tr>
                 );
               })}
