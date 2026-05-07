@@ -291,14 +291,37 @@ function buildTreeCC(rows: GastoTerceroRow[]): Nivel1CC[] {
     }));
 }
 
-function TabPorCC({ filtros }: { filtros: FiltroDashboard }) {
+function TabPorCC({ plan, filtros }: TabProps) {
   const [mesLocal, setMesLocal] = useState<number | "Todos">("Todos");
   const gastos = useGastosPorCC({
     año: filtros.año,
     mes: mesLocal,
     compania: filtros.compania,
   });
+  const eriCC = useEriAllCC({
+    año: filtros.año,
+    compania: filtros.compania,
+    mes: mesLocal,
+  });
   const tree = useMemo(() => buildTreeCC(gastos.data ?? []), [gastos.data]);
+
+  const eriMap = useMemo(() => {
+    const m = new Map<number, Map<string, number>>();
+    for (const r of eriCC.data ?? []) {
+      let inner = m.get(r.orden);
+      if (!inner) { inner = new Map(); m.set(r.orden, inner); }
+      inner.set(r.cc_key, (inner.get(r.cc_key) ?? 0) + (Number(r.valor_pyg) || 0));
+    }
+    return m;
+  }, [eriCC.data]);
+
+  const getCCVals = (orden: number): ValoresPorCC => {
+    const inner = eriMap.get(orden);
+    if (!inner) return {};
+    const r: ValoresPorCC = {};
+    for (const [cc, v] of inner.entries()) r[cc] = v;
+    return r;
+  };
 
   const [openN1, setOpenN1] = useState<Set<string>>(new Set());
   const [openN2, setOpenN2] = useState<Set<string>>(new Set());
@@ -326,7 +349,42 @@ function TabPorCC({ filtros }: { filtros: FiltroDashboard }) {
   const getConsolidado = (vals: ValoresPorCC) =>
     CC_KEYS.reduce((s, cc) => s + (vals[cc.key] ?? 0), 0);
 
-  const totalConsolidado = tree.reduce((s, n) => s + getConsolidado(n.valores), 0);
+  const planRows: PlanPygRow[] = plan.data ?? [];
+  const ingresosCuentas = planRows.filter(
+    (r) => r.nivel === "Cuenta" && (r as any).clase_cod === "4" && (r as any).grupo_cod === "41"
+  );
+  const otrosIngresosCuentas = planRows.filter(
+    (r) => r.nivel === "Cuenta" && (r as any).clase_cod === "4" && (r as any).grupo_cod === "42"
+  );
+  const costosCuentas = planRows.filter(
+    (r) => r.nivel === "Cuenta" && (r as any).clase_cod === "6"
+  );
+
+  const vTotalIngresos = getCCVals(15);
+  const vTotalCostos = getCCVals(19);
+
+  const vUtilidadBruta: ValoresPorCC = {};
+  for (const cc of CC_KEYS) {
+    vUtilidadBruta[cc.key] = (vTotalIngresos[cc.key] ?? 0) - Math.abs(vTotalCostos[cc.key] ?? 0);
+  }
+
+  const gastosOperTree = tree.find((n) => n.tipo_gasto === "01.GASTOS OPERACIONALES");
+  const gastosNoOperTree = tree.find((n) => n.tipo_gasto === "02.GASTO NO OPERACIONAL");
+
+  const vGastosOper = gastosOperTree?.valores ?? {};
+  const vUtilidadOper: ValoresPorCC = {};
+  for (const cc of CC_KEYS) {
+    vUtilidadOper[cc.key] = (vUtilidadBruta[cc.key] ?? 0) - (vGastosOper[cc.key] ?? 0);
+  }
+
+  const vOtrosIngresos = getCCVals(37);
+  const vOtrosGastos = gastosNoOperTree?.valores ?? {};
+
+  const vUtilidadAI: ValoresPorCC = {};
+  for (const cc of CC_KEYS) {
+    vUtilidadAI[cc.key] =
+      (vUtilidadOper[cc.key] ?? 0) + (vOtrosIngresos[cc.key] ?? 0) - (vOtrosGastos[cc.key] ?? 0);
+  }
 
   const año = filtros.año === "Todas" ? 2026 : Number(filtros.año);
   const mesesDisponibles: { value: number | "Todos"; label: string }[] = [
