@@ -792,14 +792,22 @@ function TabMesAMes({ plan, filtros }: TabProps) {
   }, [plan.data, eriAll.data]);
 
   const terceroMap = useMemo(() => {
-    const map = new Map<number, Map<number, Map<string, number>>>();
+    // map: orden -> tercero_key -> { nombre, cc, mesValues }
+    const map = new Map<number, Map<string, {
+      nombre: string; cc: string; mesValues: Map<number, number>
+    }>>();
     for (const r of eriAll.data ?? []) {
+      const nit = (r as any).tercero_key || '';
+      const cc = r.cc_key || '';
+      const nombre = ((r as any).nombre_tercero ?? (r as any).concepto ?? '')
+        .replace(/\d+$/, '').trim() || 'Sin identificar';
+      const key = `${nit}||${cc}`;
       if (!map.has(r.orden)) map.set(r.orden, new Map());
-      const mesMap = map.get(r.orden)!;
-      if (!mesMap.has(r.año_mes_num)) mesMap.set(r.año_mes_num, new Map());
-      const nombre = ((r as any).concepto ?? '').replace(/\d+$/, '').trim() || 'Sin detalle';
-      const tercMap = mesMap.get(r.año_mes_num)!;
-      tercMap.set(nombre, (tercMap.get(nombre) ?? 0) + (Number(r.valor_pyg) || 0));
+      const inner = map.get(r.orden)!;
+      if (!inner.has(key)) inner.set(key, { nombre, cc, mesValues: new Map() });
+      const entry = inner.get(key)!;
+      const prev = entry.mesValues.get(r.año_mes_num) ?? 0;
+      entry.mesValues.set(r.año_mes_num, prev + (Number(r.valor_pyg) || 0));
     }
     return map;
   }, [eriAll.data]);
@@ -883,31 +891,39 @@ function TabMesAMes({ plan, filtros }: TabProps) {
             {pct != null ? `${pct.toFixed(2)}%` : '-'}
           </td>
         </tr>
-        {isOpen && months.map(mes => {
-          const tercMesMap = terceroMap.get(row.orden)?.get(mes);
-          if (!tercMesMap) return null;
-          return Array.from(tercMesMap.entries())
-            .filter(([, v]) => v !== 0)
-            .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
-            .map(([nombre, val], ti) => {
-              const f = formatCell(val);
+        {isOpen && (() => {
+          const tercMap = terceroMap.get(row.orden);
+          if (!tercMap) return null;
+          return Array.from(tercMap.entries())
+            .map(([key, entry]) => {
+              const total = Array.from(entry.mesValues.values()).reduce((s,v) => s+v, 0);
+              if (total === 0) return null;
+              const f = formatCell(total);
+              const nit = key.split('||')[0];
               return (
-                <tr key={`${row.orden}||${mes}||${ti}`} className="border-b border-border/10" style={{ background: '#080c18' }}>
+                <tr key={key} className="border-b border-border/10" style={{ background: '#080c18' }}>
                   <td className="px-3 py-0.5 pl-16 text-[10px] text-muted-foreground/60">
-                    <span className="mr-2 text-[9px] bg-muted/40 px-1 rounded font-mono">{mesLabel(mes)}</span>
-                    {nombre}
+                    <div className="flex items-center gap-2">
+                      {nit && nit !== 'SIN TERCERO' && (
+                        <span className="flex-shrink-0 rounded bg-muted/40 px-1 font-mono text-[9px] text-muted-foreground">{nit}</span>
+                      )}
+                      <span className="flex-shrink-0 rounded bg-primary/20 px-1 font-mono text-[9px] text-primary/70">
+                        {entry.cc.replace(/^\d+-/, '')}
+                      </span>
+                      <span>{entry.nombre}</span>
+                    </div>
                   </td>
-                  {months.map(m => {
-                    const v = m === mes ? val : 0;
+                  {months.map(mes => {
+                    const v = entry.mesValues.get(mes) ?? 0;
                     const fv = formatCell(v);
-                    return <td key={m} className={`${colClass} text-[10px] ${fv.zero ? 'text-muted-foreground/20' : fv.negative ? 'text-destructive' : 'text-muted-foreground/50'}`}>{fv.text}</td>;
+                    return <td key={mes} className={`whitespace-nowrap px-3 py-0.5 text-right text-[10px] tabular-nums ${fv.zero ? 'text-muted-foreground/20' : fv.negative ? 'text-destructive' : 'text-muted-foreground/50'}`}>{fv.text}</td>;
                   })}
-                  <td className={`${colClass} text-[10px] ${f.negative ? 'text-destructive' : 'text-muted-foreground/50'}`}>{f.text}</td>
+                  <td className={`whitespace-nowrap px-3 py-0.5 text-right text-[10px] tabular-nums font-semibold ${f.negative ? 'text-destructive' : 'text-muted-foreground/60'}`}>{f.text}</td>
                   <td className="px-3 py-0.5 text-right text-[10px] text-muted-foreground/20">-</td>
                 </tr>
               );
             });
-        })}
+        })()}
       </Fragment>
     );
   };
