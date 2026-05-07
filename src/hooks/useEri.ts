@@ -69,9 +69,7 @@ export function useEriAllMonths(filtros: {
   return useQuery({
     queryKey: ["eri-all-months", filtros],
     queryFn: async (): Promise<EriCompactRow[]> => {
-      let q = supabase
-        .from("v_eri_por_mes")
-        .select("orden,año_mes_num,cc_key,compania,valor_pyg");
+      let q = supabase.from("v_eri_por_mes").select("*");
       if (filtros.año !== "Todas") {
         q = q
           .gte("año_mes_num", filtros.año * 100 + 1)
@@ -83,7 +81,7 @@ export function useEriAllMonths(filtros: {
         .order("orden", { ascending: true })
         .order("año_mes_num", { ascending: true });
       if (error) throw error;
-      return (data ?? []) as EriCompactRow[];
+      return (data ?? []) as unknown as EriCompactRow[];
     },
   });
 }
@@ -96,9 +94,7 @@ export function useEriAllCC(filtros: {
   return useQuery({
     queryKey: ["eri-all-cc", filtros],
     queryFn: async (): Promise<EriCompactRow[]> => {
-      let q = supabase
-        .from("v_eri_por_mes")
-        .select("orden,año_mes_num,cc_key,compania,valor_pyg");
+      let q = supabase.from("v_eri_por_mes").select("*");
       if (filtros.año !== "Todas") {
         q = q
           .gte("año_mes_num", filtros.año * 100 + 1)
@@ -110,7 +106,7 @@ export function useEriAllCC(filtros: {
         .order("orden", { ascending: true })
         .order("cc_key", { ascending: true });
       if (error) throw error;
-      return (data ?? []) as EriCompactRow[];
+      return (data ?? []) as unknown as EriCompactRow[];
     },
   });
 }
