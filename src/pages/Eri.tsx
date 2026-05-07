@@ -771,6 +771,12 @@ function TabMesAMes({ plan, filtros }: TabProps) {
     ccKey: ccActivo,
   });
 
+  const [openSections, setOpenSections] = useState<Set<string>>(
+    new Set(['ingresos', 'costos', 'gastos', 'otros-ingresos', 'otros-gastos'])
+  );
+  const toggleSection = (k: string) =>
+    setOpenSections(prev => { const s = new Set(prev); s.has(k) ? s.delete(k) : s.add(k); return s; });
+
   const { planRows, valueMap, months } = useMemo(() => {
     const planRows: PlanPygRow[] = plan.data ?? [];
     const map = new Map<number, Map<number, number>>();
@@ -788,12 +794,122 @@ function TabMesAMes({ plan, filtros }: TabProps) {
     return { planRows, valueMap: map, months };
   }, [plan.data, eriAll.data]);
 
+  const totalIngresosAcum = useMemo(() => {
+    const ingRows = planRows.filter(r => r.nivel === 'Cuenta' && (r as any).clase_cod === '4' && (r as any).grupo_cod === '41');
+    let total = 0;
+    for (const row of ingRows) {
+      const inner = valueMap.get(row.orden);
+      if (inner) for (const v of inner.values()) total += v;
+    }
+    return total || 1;
+  }, [planRows, valueMap]);
+
   const isLoading = plan.isLoading || eriAll.isLoading;
   const isError = plan.isError || eriAll.isError;
 
+  const colClass = "whitespace-nowrap px-3 py-1.5 text-right tabular-nums";
+
+  const renderRow = (row: PlanPygRow, idx: number) => {
+    const inner = valueMap.get(row.orden);
+    const monthValues = months.map(m => inner?.get(m) ?? 0);
+    const total = monthValues.reduce((s, v) => s + v, 0);
+    if (row.nivel === 'Cuenta' && total === 0 && monthValues.every(v => v === 0)) return null;
+
+    const isTitulo = row.nivel === 'Titulo';
+    const isTotal = row.nivel === 'Total';
+    const isSubtotal = row.nivel === 'Subtotal';
+    const rowStyle: React.CSSProperties = {};
+    let rowClass = 'border-b border-border/40';
+    let indent = 'px-3';
+    if (isTitulo) {
+      rowStyle.background = '#1e2d42';
+      rowClass += ' font-bold text-foreground';
+    } else if (isTotal) {
+      rowStyle.background = total >= 0 ? '#1a2d1a' : '#2d1a1a';
+      rowClass += ' font-bold';
+    } else if (isSubtotal) {
+      rowStyle.background = '#0d2040';
+      rowClass += ' font-bold text-[12px] border-l-2 border-l-primary';
+    } else {
+      rowClass += idx % 2 === 0 ? ' bg-background/20' : '';
+      indent = 'px-3 pl-8';
+    }
+    const pct = !isTitulo && total !== 0 ? (total / totalIngresosAcum) * 100 : null;
+    return (
+      <tr key={row.orden} className={rowClass} style={rowStyle}>
+        <td className={`${indent} py-1.5 text-[11px] ${isTitulo || isSubtotal || isTotal ? 'text-foreground' : 'text-muted-foreground'}`}>
+          {row.etiqueta_fila || row.concepto}
+        </td>
+        {isTitulo
+          ? months.map(m => <td key={m} className="px-3 py-1.5" />)
+          : monthValues.map((v, i) => {
+              const f = formatCell(v);
+              return (
+                <td key={i} className={`${colClass} ${f.negative ? 'text-destructive' : f.zero ? 'text-muted-foreground/30' : 'text-foreground'}`}>
+                  {f.text}
+                </td>
+              );
+            })}
+        {isTitulo ? (
+          <><td className="px-3 py-1.5" /><td className="px-3 py-1.5" /></>
+        ) : (
+          <>
+            {(() => {
+              const f = formatCell(total);
+              return (
+                <td className={`${colClass} font-semibold ${f.negative ? 'text-destructive' : f.zero ? 'text-muted-foreground/30' : isSubtotal ? 'text-foreground' : 'text-primary'}`}>
+                  {f.text}
+                </td>
+              );
+            })()}
+            <td className={`whitespace-nowrap px-3 py-1.5 text-right text-[10px] tabular-nums text-muted-foreground/70 ${isTotal || isSubtotal ? 'font-bold' : ''}`}>
+              {pct != null ? `${pct.toFixed(2)}%` : '-'}
+            </td>
+          </>
+        )}
+      </tr>
+    );
+  };
+
+  const SectionHeader = ({ label, sectionKey }: { label: string; sectionKey: string }) => {
+    const isOpen = openSections.has(sectionKey);
+    return (
+      <tr style={{ background: '#1e2d42' }} className="cursor-pointer hover:opacity-90"
+          onClick={() => toggleSection(sectionKey)}>
+        <td colSpan={months.length + 3} className="px-3 py-2 text-[11px] font-bold uppercase tracking-wide text-foreground">
+          <span className="mr-2 text-[10px] text-muted-foreground">{isOpen ? '▼' : '▶'}</span>
+          {label}
+        </td>
+      </tr>
+    );
+  };
+
+  const ingresoRows = planRows.filter(r => (r as any).clase_cod === '4' && (r as any).grupo_cod === '41');
+  const costosRows = planRows.filter(r => (r as any).clase_cod === '6');
+  const gastosRows = planRows.filter(r => (r as any).clase_cod === '5');
+  const otrosIngRows = planRows.filter(r => (r as any).clase_cod === '4' && (r as any).grupo_cod === '42');
+
+  const utilBrutaRow = planRows.find(r => r.nivel === 'Subtotal' && r.orden === 20);
+  const utilOperRow = planRows.find(r => r.nivel === 'Subtotal' && r.orden === 83);
+  const utilNetaRow = planRows.find(r => r.nivel === 'Subtotal' && r.orden === 96);
+  const totIngRow = planRows.find(r => r.nivel === 'Total' && r.orden === 15);
+  const totCostRow = planRows.find(r => r.nivel === 'Total' && r.orden === 19);
+
   return (
     <div>
-      <CcPills value={ccActivo} onChange={setCcActivo} />
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <CcPills value={ccActivo} onChange={setCcActivo} />
+        <div className="flex gap-2">
+          <button onClick={() => setOpenSections(new Set(['ingresos','costos','gastos','otros-ingresos','otros-gastos']))}
+            className="rounded-md border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+            Expandir todo
+          </button>
+          <button onClick={() => setOpenSections(new Set())}
+            className="rounded-md border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+            Contraer todo
+          </button>
+        </div>
+      </div>
       {isLoading ? (
         <div className="space-y-2">
           {Array.from({ length: 12 }).map((_, i) => (
@@ -823,68 +939,23 @@ function TabMesAMes({ plan, filtros }: TabProps) {
                 <th className="whitespace-nowrap px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-primary">
                   Acumulado
                 </th>
-                <th className="min-w-[60px] whitespace-nowrap px-2 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">% Vert.</th>
+                <th className="min-w-[70px] whitespace-nowrap px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground/60">% Vert.</th>
               </tr>
             </thead>
             <tbody>
-              {planRows.map((row, idx) => {
-                const inner = valueMap.get(row.orden);
-                const monthValues = months.map((m) => inner?.get(m) ?? 0);
-                const total = monthValues.reduce((s, v) => s + v, 0);
-                const { rowStyle, rowClass, isTitulo } = rowStyling(row.nivel, total, idx);
-                return (
-                  <tr key={row.orden} className={rowClass} style={rowStyle}>
-                    <td className="px-3 py-1.5 text-foreground">
-                      {row.etiqueta_fila || row.concepto}
-                    </td>
-                    {isTitulo
-                      ? months.map((m) => <td key={m} className="px-3 py-1.5" />)
-                      : monthValues.map((v, i) => {
-                          const f = formatCell(v);
-                          return (
-                            <td
-                              key={i}
-                              className={`whitespace-nowrap px-3 py-1.5 text-right tabular-nums ${
-                                f.negative
-                                  ? "text-destructive"
-                                  : f.zero
-                                  ? "text-muted-foreground"
-                                  : "text-foreground"
-                              }`}
-                            >
-                              {f.text}
-                            </td>
-                          );
-                        })}
-                    {isTitulo ? (
-                      <td className="px-3 py-1.5" />
-                    ) : (
-                      (() => {
-                        const f = formatCell(total);
-                        return (
-                          <td
-                            className={`whitespace-nowrap px-3 py-1.5 text-right font-semibold tabular-nums ${
-                              f.negative
-                                ? "text-destructive"
-                                : f.zero
-                                ? "text-muted-foreground"
-                                : "text-foreground"
-                            }`}
-                          >
-                            {f.text}
-                          </td>
-                        );
-                      })()
-                    )}
-                    {isTitulo ? <td className="px-3 py-1.5" /> : (() => {
-                      const ingrTotal = valueMap.get(15);
-                      const ingAcum = months.reduce((s,m) => s + (ingrTotal?.get(m) ?? 0), 0) || 1;
-                      const pct = (total / ingAcum) * 100;
-                      return <td className="whitespace-nowrap px-3 py-1.5 text-right text-[10px] tabular-nums text-muted-foreground">{total !== 0 ? `${pct.toFixed(2)}%` : '-'}</td>;
-                    })()}
-                  </tr>
-                );
-              })}
+              <SectionHeader label="INGRESOS OPERACIONALES" sectionKey="ingresos" />
+              {openSections.has('ingresos') && ingresoRows.map((r,i) => renderRow(r,i))}
+              {openSections.has('ingresos') && totIngRow && renderRow(totIngRow, 99)}
+              <SectionHeader label="COSTOS DE VENTAS" sectionKey="costos" />
+              {openSections.has('costos') && costosRows.map((r,i) => renderRow(r,i))}
+              {openSections.has('costos') && totCostRow && renderRow(totCostRow, 99)}
+              {utilBrutaRow && renderRow(utilBrutaRow, 99)}
+              <SectionHeader label="GASTOS OPERACIONALES" sectionKey="gastos" />
+              {openSections.has('gastos') && gastosRows.map((r,i) => renderRow(r,i))}
+              {utilOperRow && renderRow(utilOperRow, 99)}
+              <SectionHeader label="OTROS INGRESOS" sectionKey="otros-ingresos" />
+              {openSections.has('otros-ingresos') && otrosIngRows.map((r,i) => renderRow(r,i))}
+              {utilNetaRow && renderRow(utilNetaRow, 99)}
             </tbody>
           </table>
         </div>
