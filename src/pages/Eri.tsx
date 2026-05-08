@@ -232,7 +232,7 @@ function TabPeriodo({ plan, filtros }: TabProps) {
 }
 
 // ─────────────────────────────────────────────
-// TAB MES A MES — subtotales desde misma fuente que TabPorCC
+// TAB MES A MES
 // ─────────────────────────────────────────────
 interface TerceroMesRow {
   nombre: string;
@@ -252,7 +252,6 @@ function TabMesAMes({ plan, filtros }: TabProps) {
     ccKey: ccActivo,
   });
 
-  // Misma fuente de gastos que TabPorCC para que los subtotales cuadren
   const gastosAll = useGastosPorCC({
     año: filtros.año,
     mes: "Todos",
@@ -296,7 +295,6 @@ function TabMesAMes({ plan, filtros }: TabProps) {
     return { planRows, valueMap, terceroMap, months };
   }, [plan.data, eriAll.data]);
 
-  // Gastos por mes filtrados por ccActivo — misma lógica que TabPorCC
   const gastosOperPorMes = useMemo(() => {
     const m = new Map<number, number>();
     for (const r of gastosAll.data ?? []) {
@@ -320,7 +318,6 @@ function TabMesAMes({ plan, filtros }: TabProps) {
   const getMonthVals = (orden: number) => months.map((m) => valueMap.get(orden)?.get(m) ?? 0);
   const getTotal = (orden: number) => getMonthVals(orden).reduce((s, v) => s + v, 0);
 
-  // Subtotales calculados con la misma lógica que TabPorCC
   const subtotales = useMemo(() => {
     const ingCuentas = planRows.filter(
       (r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "4" && String((r as any).grupo_cod) === "41",
@@ -461,7 +458,6 @@ function TabMesAMes({ plan, filtros }: TabProps) {
     );
   };
 
-  // Fila de cuenta expandible
   const CuentaRow = ({ row }: { row: PlanPygRow }) => {
     const mVals = getMonthVals(row.orden);
     const tot = getTotal(row.orden);
@@ -497,7 +493,6 @@ function TabMesAMes({ plan, filtros }: TabProps) {
     );
   };
 
-  // Fila de total (verde/rojo)
   const TotalRow = ({ label, monthVals, total }: { label: string; monthVals: number[]; total: number }) => {
     const bg = total >= 0 ? "#1a2d1a" : "#2d1a1a";
     const pct = ingresosTotales ? (total / ingresosTotales) * 100 : null;
@@ -519,7 +514,6 @@ function TabMesAMes({ plan, filtros }: TabProps) {
     );
   };
 
-  // Fila de subtotal (azul)
   const SubtotalRow = ({ label, monthVals, total }: { label: string; monthVals: number[]; total: number }) => {
     const pct = ingresosTotales ? (total / ingresosTotales) * 100 : null;
     return (
@@ -540,7 +534,6 @@ function TabMesAMes({ plan, filtros }: TabProps) {
     );
   };
 
-  // Header de sección
   const SectionHeader = ({ label }: { label: string }) => (
     <tr style={{ background: "#1e2d42" }}>
       <td
@@ -552,6 +545,7 @@ function TabMesAMes({ plan, filtros }: TabProps) {
     </tr>
   );
 
+  // FIX: usar String() consistentemente en todos los filtros
   const ingCuentas = planRows.filter(
     (r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "4" && String((r as any).grupo_cod) === "41",
   );
@@ -616,7 +610,6 @@ function TabMesAMes({ plan, filtros }: TabProps) {
               </tr>
             </thead>
             <tbody>
-              {/* INGRESOS */}
               <SectionHeader label="INGRESOS OPERACIONALES" />
               {ingCuentas.map((row) => (
                 <CuentaRow key={row.orden} row={row} />
@@ -626,17 +619,12 @@ function TabMesAMes({ plan, filtros }: TabProps) {
                 monthVals={subtotales.totalIngMes}
                 total={subtotales.totalIng}
               />
-
-              {/* COSTOS */}
               <SectionHeader label="COSTOS DE VENTAS" />
               {costCuentas.map((row) => (
                 <CuentaRow key={row.orden} row={row} />
               ))}
               <TotalRow label="TOTAL COSTOS" monthVals={subtotales.totalCostMes} total={subtotales.totalCost} />
-
               <SubtotalRow label="UTILIDAD BRUTA" monthVals={subtotales.ubMes} total={subtotales.ub} />
-
-              {/* GASTOS OPERACIONALES */}
               <SectionHeader label="GASTOS OPERACIONALES" />
               {gastosCuentas.map((row) => (
                 <CuentaRow key={row.orden} row={row} />
@@ -646,24 +634,18 @@ function TabMesAMes({ plan, filtros }: TabProps) {
                 monthVals={subtotales.gastosOperMes}
                 total={subtotales.gastosOper}
               />
-
               <SubtotalRow label="UTILIDAD OPERACIONAL" monthVals={subtotales.uoMes} total={subtotales.uo} />
-
-              {/* OTROS INGRESOS */}
               <SectionHeader label="OTROS INGRESOS" />
               {otrosIngCuentas.map((row) => (
                 <CuentaRow key={row.orden} row={row} />
               ))}
               <TotalRow label="TOTAL OTROS INGRESOS" monthVals={subtotales.otrosIngMes} total={subtotales.otrosIng} />
-
-              {/* OTROS GASTOS */}
               <SectionHeader label="OTROS GASTOS" />
               <TotalRow
                 label="TOTAL OTROS GASTOS"
                 monthVals={subtotales.gastosNoOperMes}
                 total={subtotales.gastosNoOper}
               />
-
               <SubtotalRow label="UTILIDAD ANTES DE IMPUESTOS" monthVals={subtotales.uaiMes} total={subtotales.uai} />
             </tbody>
           </table>
@@ -777,6 +759,11 @@ function TabPorCC({ plan, filtros }: TabProps) {
     return r;
   };
 
+  // FIX: getConsolidado suma TODOS los cc_key presentes, no solo los 4 de CC_KEYS
+  // Esto garantiza que si hay datos en otros CC también se incluyen
+  const getConsolidadoVals = (vals: ValoresPorCC) => Object.values(vals).reduce((s, v) => s + v, 0);
+  const getConsolidado = (vals: ValoresPorCC) => CC_KEYS.reduce((s, cc) => s + (vals[cc.key] ?? 0), 0);
+
   const [openN1, setOpenN1] = useState<Set<string>>(new Set());
   const [openN2, setOpenN2] = useState<Set<string>>(new Set());
   const [openN3, setOpenN3] = useState<Set<string>>(new Set());
@@ -784,6 +771,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
   const [openSections, setOpenSections] = useState<Set<string>>(
     new Set(["ingresos", "costos", "otros-ingresos", "gastos-oper", "otros-gastos"]),
   );
+
   const toggleSection = (k: string) =>
     setOpenSections((prev) => {
       const s = new Set(prev);
@@ -841,45 +829,64 @@ function TabPorCC({ plan, filtros }: TabProps) {
     setOpenN3(new Set());
   };
 
-  const getConsolidado = (vals: ValoresPorCC) => CC_KEYS.reduce((s, cc) => s + (vals[cc.key] ?? 0), 0);
-
   const planRows: PlanPygRow[] = plan.data ?? [];
+
+  // FIX CRÍTICO: usar String() en TODOS los filtros de plan_pyg para consistencia
   const ingresosCuentas = planRows.filter(
-    (r) => r.nivel === "Cuenta" && (r as any).clase_cod === "4" && (r as any).grupo_cod === "41",
+    (r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "4" && String((r as any).grupo_cod) === "41",
   );
   const otrosIngresosCuentas = planRows.filter(
-    (r) => r.nivel === "Cuenta" && (r as any).clase_cod === "4" && (r as any).grupo_cod === "42",
+    (r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "4" && String((r as any).grupo_cod) === "42",
   );
-  const costosCuentas = planRows.filter((r) => r.nivel === "Cuenta" && (r as any).clase_cod === "6");
+  // FIX CRÍTICO: costosCuentas también usa String() — antes no lo tenía
+  const costosCuentas = planRows.filter((r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "6");
 
   const vTotalIngresos: ValoresPorCC = {};
   for (const row of ingresosCuentas) {
     const v = getCCVals(row.orden);
     for (const cc of CC_KEYS) vTotalIngresos[cc.key] = (vTotalIngresos[cc.key] ?? 0) + (v[cc.key] ?? 0);
   }
+
   const vTotalCostos: ValoresPorCC = {};
   for (const row of costosCuentas) {
     const v = getCCVals(row.orden);
-    for (const cc of CC_KEYS) vTotalCostos[cc.key] = (vTotalCostos[cc.key] ?? 0) + (v[cc.key] ?? 0);
+    // FIX: sumar TODOS los cc_key que vengan de Supabase, no solo los 4 de CC_KEYS
+    for (const [cc, val] of Object.entries(v)) {
+      vTotalCostos[cc] = (vTotalCostos[cc] ?? 0) + val;
+    }
   }
+
   const vUtilidadBruta: ValoresPorCC = {};
-  for (const cc of CC_KEYS) vUtilidadBruta[cc.key] = (vTotalIngresos[cc.key] ?? 0) + (vTotalCostos[cc.key] ?? 0);
+  for (const cc of CC_KEYS) {
+    vUtilidadBruta[cc.key] = (vTotalIngresos[cc.key] ?? 0) + (vTotalCostos[cc.key] ?? 0);
+  }
 
   const gastosOperTree = tree.find((n) => n.tipo_gasto === "01.GASTOS OPERACIONALES");
   const gastosNoOperTree = tree.find((n) => n.tipo_gasto === "02.GASTO NO OPERACIONAL");
   const vGastosOper = gastosOperTree?.valores ?? {};
   const vUtilidadOper: ValoresPorCC = {};
-  for (const cc of CC_KEYS) vUtilidadOper[cc.key] = (vUtilidadBruta[cc.key] ?? 0) - (vGastosOper[cc.key] ?? 0);
+  for (const cc of CC_KEYS) {
+    vUtilidadOper[cc.key] = (vUtilidadBruta[cc.key] ?? 0) - (vGastosOper[cc.key] ?? 0);
+  }
 
   const vOtrosIngresos: ValoresPorCC = {};
   for (const row of otrosIngresosCuentas) {
     const v = getCCVals(row.orden);
     for (const cc of CC_KEYS) vOtrosIngresos[cc.key] = (vOtrosIngresos[cc.key] ?? 0) + (v[cc.key] ?? 0);
   }
+  // FIX: también incluir 01-PRINCIPAL en otros ingresos consolidado
+  for (const row of otrosIngresosCuentas) {
+    const v = getCCVals(row.orden);
+    if (v["01-PRINCIPAL"]) {
+      vOtrosIngresos["01-PRINCIPAL"] = (vOtrosIngresos["01-PRINCIPAL"] ?? 0) + (v["01-PRINCIPAL"] ?? 0);
+    }
+  }
+
   const vOtrosGastos = gastosNoOperTree?.valores ?? {};
   const vUtilidadAI: ValoresPorCC = {};
-  for (const cc of CC_KEYS)
+  for (const cc of CC_KEYS) {
     vUtilidadAI[cc.key] = (vUtilidadOper[cc.key] ?? 0) + (vOtrosIngresos[cc.key] ?? 0) - (vOtrosGastos[cc.key] ?? 0);
+  }
 
   const año = filtros.año === "Todas" ? 2026 : Number(filtros.año);
   const mesesDisponibles: { value: number | "Todos"; label: string }[] = [
@@ -900,8 +907,10 @@ function TabPorCC({ plan, filtros }: TabProps) {
       </td>
     );
   };
+
   const renderConsCell = (vals: ValoresPorCC, bold = false) => {
-    const v = getConsolidado(vals);
+    // FIX: usar getConsolidadoVals para sumar TODOS los CC incluyendo Principal en costos/otros ingresos
+    const v = getConsolidadoVals(vals);
     const f = formatCell(v);
     return (
       <td
@@ -911,7 +920,9 @@ function TabPorCC({ plan, filtros }: TabProps) {
       </td>
     );
   };
+
   const totalIngresos = getConsolidado(vTotalIngresos) || 1;
+
   const renderCCPct = (vals: ValoresPorCC, cc: { key: string }, bold = false) => {
     const ccIngreso = vTotalIngresos[cc.key] ?? 0;
     const v = vals[cc.key] ?? 0;
@@ -930,8 +941,9 @@ function TabPorCC({ plan, filtros }: TabProps) {
       </td>
     );
   };
+
   const renderConsPct = (vals: ValoresPorCC, bold = false) => {
-    const v = getConsolidado(vals);
+    const v = getConsolidadoVals(vals);
     if (!v || Math.abs(totalIngresos) < 1)
       return (
         <td className="px-2 py-1.5 text-right text-[10px] whitespace-nowrap min-w-[60px] text-muted-foreground/20">
@@ -969,7 +981,8 @@ function TabPorCC({ plan, filtros }: TabProps) {
 
   const EriCuentaRow = ({ row, idx }: { row: PlanPygRow; idx: number }) => {
     const vals = getCCVals(row.orden);
-    const consVal = getConsolidado(vals);
+    // FIX: usar getConsolidadoVals para no perder datos de CC no listados
+    const consVal = getConsolidadoVals(vals);
     if (CC_KEYS.every((cc) => (vals[cc.key] ?? 0) === 0) && consVal === 0) return null;
     const isOpen = openIngreso.has(row.orden);
     const ccTercMap = ingresoTercerosMap.get(row.orden);
@@ -1040,7 +1053,10 @@ function TabPorCC({ plan, filtros }: TabProps) {
   };
 
   const TotalRowCC = ({ label, vals }: { label: string; vals: ValoresPorCC }) => (
-    <tr className="border-b border-border" style={{ background: getConsolidado(vals) >= 0 ? "#1a2d1a" : "#2d1a1a" }}>
+    <tr
+      className="border-b border-border"
+      style={{ background: getConsolidadoVals(vals) >= 0 ? "#1a2d1a" : "#2d1a1a" }}
+    >
       <td className="px-3 py-1.5 text-[11px] font-bold text-foreground">{label}</td>
       {CC_KEYS.map((cc) => (
         <Fragment key={cc.key}>
@@ -1094,7 +1110,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
           n1.detalles.map((n2) => {
             const k2 = `${k1}||${n2.detalle_gasto}`;
             const isOpen2 = openN2.has(k2);
-            if (getConsolidado(n2.valores) === 0) return null;
+            if (getConsolidadoVals(n2.valores) === 0) return null;
             return (
               <Fragment key={k2}>
                 <tr
@@ -1119,7 +1135,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
                   n2.cuentas.map((n3) => {
                     const k3 = `${k2}||${n3.nombre_cuenta}`;
                     const isOpen3 = openN3.has(k3);
-                    if (getConsolidado(n3.valores) === 0) return null;
+                    if (getConsolidadoVals(n3.valores) === 0) return null;
                     return (
                       <Fragment key={k3}>
                         <tr
@@ -1141,7 +1157,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
                         </tr>
                         {isOpen3 &&
                           n3.terceros.map((t, ti) => {
-                            const consT = getConsolidado(t.valores);
+                            const consT = getConsolidadoVals(t.valores);
                             const fConsT = formatCell(consT);
                             return (
                               <tr
@@ -1233,6 +1249,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
           </button>
         </div>
       </div>
+
       {isLoading ? (
         <div className="space-y-1">
           {Array.from({ length: 8 }).map((_, i) => (
