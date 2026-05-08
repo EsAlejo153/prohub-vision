@@ -11,7 +11,7 @@ interface FiltrosContextValue extends FiltroDashboard {
 const FiltrosContext = createContext<FiltrosContextValue | undefined>(undefined);
 
 export function FiltrosProvider({ children }: { children: ReactNode }) {
-  const [año, setAño] = useState<AnioFiltro>("Todas");
+  const [año, setAño] = useState<AnioFiltro>(2026);
   const [mes, setMes] = useState<MesFiltro>("Todos");
   const [ccKey, setCcKey] = useState<CcFiltro>("Todas");
   const [compania, setCompania] = useState<CompaniaFiltro>("Todas");
@@ -31,10 +31,15 @@ export function useFiltros() {
 
 /**
  * Build (yyyymm_min, yyyymm_max) from current año/mes filters.
- * Returns null if no year filter (i.e. all-time).
+ * año="Todas" → limita al año de datos cargados (2026) para evitar traer todos los años.
  */
 export function buildPeriodoRange(año: AnioFiltro, mes: MesFiltro): { min: number; max: number } | null {
-  if (año === "Todas") return null;
+  const AÑO_DATOS = 2026; // año con datos cargados en BD
+
+  if (año === "Todas") {
+    // No devolver null — limitar al año de datos para evitar sumar 2024+2025+2026+2027
+    return { min: AÑO_DATOS * 100 + 1, max: AÑO_DATOS * 100 + 12 };
+  }
   if (mes === "Todos") {
     return { min: año * 100 + 1, max: año * 100 + 12 };
   }
