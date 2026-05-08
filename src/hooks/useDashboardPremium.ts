@@ -54,29 +54,10 @@ export interface TopCuentaRow {
   participacion_pct?: number;
 }
 
-const MES_LABELS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
-
-function buildLabel(yyyymm: number) {
-  const m = yyyymm % 100;
-  return MES_LABELS[m - 1] ?? String(m);
-}
-
-// Recalcula porcentajes desde los valores absolutos ya consolidados
-function recomputePcts(r: KpiMesRow): KpiMesRow {
-  const ing = r.ingresos || 1;
-  const act = r.activos_totales || 1;
-  const pat = r.patrimonio_total || 1;
-  return {
-    ...r,
-    margen_bruto_pct: r.ingresos !== 0 ? (r.utilidad_bruta / ing) * 100 : 0,
-    margen_operacional_pct: r.ingresos !== 0 ? (r.utilidad_operacional / ing) * 100 : 0,
-    margen_neto_pct: r.ingresos !== 0 ? (r.utilidad_neta / ing) * 100 : 0,
-    costo_ingreso_pct: r.ingresos !== 0 ? (r.costos / ing) * 100 : 0,
-    endeudamiento_pct: r.activos_totales !== 0 ? (Math.abs(r.pasivos_totales) / Math.abs(act)) * 100 : 0,
-    autonomia_pct: r.activos_totales !== 0 ? (r.patrimonio_total / Math.abs(act)) * 100 : 0,
-    roe_pct: r.patrimonio_total !== 0 ? (r.utilidad_neta / Math.abs(pat)) * 100 : 0,
-    roa_pct: r.activos_totales !== 0 ? (r.utilidad_neta / Math.abs(act)) * 100 : 0,
-  };
+export interface BalanceTotals {
+  activos: number;
+  pasivos: number;
+  patrimonio: number;
 }
 
 export function useKpisMesAMes(filtros: FiltroDashboard) {
@@ -84,11 +65,11 @@ export function useKpisMesAMes(filtros: FiltroDashboard) {
     queryKey: ["kpis_mes_a_mes", filtros],
     queryFn: async (): Promise<KpiMesRow[]> => {
       let q = supabase.from("v_kpis_mes_a_mes").select("*").order("año_mes_num", { ascending: true });
+
       const range = buildPeriodoRange(filtros.año, filtros.mes);
       if (range) q = q.gte("año_mes_num", range.min).lte("año_mes_num", range.max);
 
-      // "Todas" → usar fila GRUPO consolidada
-      // Empresa específica → filtrar por esa empresa
+      // "Todas" → usar fila GRUPO consolidada de la vista
       if (filtros.compania === "Todas") {
         q = q.eq("compania", "GRUPO");
       } else {
@@ -98,10 +79,9 @@ export function useKpisMesAMes(filtros: FiltroDashboard) {
       const { data, error } = await q;
       if (error) throw error;
 
-      // Ya no necesitamos agregar — la vista ya viene consolidada
       const arr = ((data ?? []) as KpiMesRow[]).sort((a, b) => a.año_mes_num - b.año_mes_num);
 
-      // Recalcular deltas
+      // Recalcular deltas mes a mes en el frontend
       for (let i = 0; i < arr.length; i++) {
         const cur = arr[i];
         const prev = i > 0 ? arr[i - 1] : null;
@@ -127,48 +107,50 @@ export function useDistribucionGastos(filtros: FiltroDashboard) {
     queryKey: ["distribucion_gastos", filtros],
     queryFn: async (): Promise<DistribucionGastosRow[]> => {
       let q = supabase.from("v_distribucion_gastos").select("*").order("año_mes_num", { ascending: true });
+
       const range = buildPeriodoRange(filtros.año, filtros.mes);
       if (range) q = q.gte("año_mes_num", range.min).lte("año_mes_num", range.max);
+
       if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+
       const { data, error } = await q;
       if (error) throw error;
 
-      // Si hay dos empresas, consolidar distribución de gastos sumando valores absolutos
-      // y recalculando porcentajes desde el total consolidado
       if (filtros.compania === "Todas") {
-        const mesMap = new Map<number, { adm: number; oper: number; fin: number; costos: number; total: number }>();
+        const mesMap = new Map<number, { adm: number; oper: number; fin: number; costos: number }>();
+        const hasAbsolutes = (data ?? []).some((r: any) => r.total_adm != null);
+
+        if (!hasAbsolutes) return (data ?? []) as DistribucionGastosRow[];
+
         for (const r of (data ?? []) as any[]) {
           const mes = r.año_mes_num;
-          const totalGastos = (r.total_adm || 0) + (r.total_oper || 0) + (r.total_fin || 0) + (r.total_costos || 0);
-          if (!mesMap.has(mes)) {
+          const ex = mesMap.get(mes);
+          if (ex) {
+            ex.adm += r.total_adm || 0;
+            ex.oper += r.total_oper || 0;
+            ex.fin += r.total_fin || 0;
+            ex.costos += r.total_costos || 0;
+          } else {
             mesMap.set(mes, {
               adm: r.total_adm || 0,
               oper: r.total_oper || 0,
               fin: r.total_fin || 0,
               costos: r.total_costos || 0,
-              total: totalGastos,
             });
-          } else {
-            const ex = mesMap.get(mes)!;
-            ex.adm += r.total_adm || 0;
-            ex.oper += r.total_oper || 0;
-            ex.fin += r.total_fin || 0;
-            ex.costos += r.total_costos || 0;
-            ex.total += totalGastos;
           }
         }
-        // Si la vista no tiene totales absolutos, fallback a promedio simple
-        const hasAbsolutes = (data ?? []).some((r: any) => r.total_adm != null);
-        if (!hasAbsolutes) return (data ?? []) as DistribucionGastosRow[];
 
-        return Array.from(mesMap.entries()).map(([mes, v]) => ({
-          compania: "Grupo",
-          año_mes_num: mes,
-          pct_adm: v.total ? (v.adm / v.total) * 100 : 0,
-          pct_oper: v.total ? (v.oper / v.total) * 100 : 0,
-          pct_fin: v.total ? (v.fin / v.total) * 100 : 0,
-          pct_costos: v.total ? (v.costos / v.total) * 100 : 0,
-        }));
+        return Array.from(mesMap.entries()).map(([mes, v]) => {
+          const total = v.adm + v.oper + v.fin + v.costos || 1;
+          return {
+            compania: "GRUPO",
+            año_mes_num: mes,
+            pct_adm: (v.adm / total) * 100,
+            pct_oper: (v.oper / total) * 100,
+            pct_fin: (v.fin / total) * 100,
+            pct_costos: (v.costos / total) * 100,
+          };
+        });
       }
 
       return (data ?? []) as DistribucionGastosRow[];
@@ -181,9 +163,12 @@ export function useTopCuentas(filtros: FiltroDashboard) {
     queryKey: ["top_cuentas", filtros],
     queryFn: async (): Promise<TopCuentaRow[]> => {
       let q = supabase.from("v_top_cuentas_ingreso").select("*").order("ranking", { ascending: true });
+
       const range = buildPeriodoRange(filtros.año, filtros.mes);
       if (range) q = q.gte("año_mes_num", range.min).lte("año_mes_num", range.max);
+
       if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+
       const { data, error } = await q;
       if (error) throw error;
       return (data ?? []) as TopCuentaRow[];
@@ -191,28 +176,40 @@ export function useTopCuentas(filtros: FiltroDashboard) {
   });
 }
 
-export interface BalanceTotals {
-  activos: number;
-  pasivos: number;
-  patrimonio: number;
-}
-
 export function useBalanceFallback(filtros: FiltroDashboard, enabled: boolean) {
   return useQuery({
     queryKey: ["balance_fallback", filtros],
     enabled,
     queryFn: async (): Promise<BalanceTotals> => {
-      let q = supabase.from("movimientos").select("clase_cod, saldo_final");
+      // Paso 1: obtener el último mes disponible dentro del rango de filtros
+      let qMes = supabase.from("movimientos").select("año_mes_num").order("año_mes_num", { ascending: false }).limit(1);
+
+      if (filtros.compania !== "Todas") qMes = qMes.eq("compania", filtros.compania);
+
+      const range = buildPeriodoRange(filtros.año, filtros.mes);
+      if (range) qMes = qMes.lte("año_mes_num", range.max).gte("año_mes_num", range.min);
+
+      const { data: mesData } = await qMes;
+      const ultimoMes = (mesData?.[0] as any)?.año_mes_num;
+      if (!ultimoMes) return { activos: 0, pasivos: 0, patrimonio: 0 };
+
+      // Paso 2: traer saldos SOLO del último mes (saldo_final es stock, no se suma)
+      let q = supabase.from("movimientos").select("clase_cod, saldo_final").eq("año_mes_num", ultimoMes);
+
       if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+
       const { data, error } = await q;
       if (error) throw error;
+
       const rows = (data ?? []) as { clase_cod: string | null; saldo_final: number | null }[];
       const sumOf = (cls: string) =>
-        rows.filter((r) => String(r.clase_cod) === cls).reduce((s, r) => s + (Number(r.saldo_final) || 0), 0);
+        rows.filter((r) => String(r.clase_cod).trim() === cls).reduce((s, r) => s + (Number(r.saldo_final) || 0), 0);
+
       const activos = sumOf("1");
       const pasivos = sumOf("2");
       const patrimonio3 = sumOf("3");
       const patrimonio = patrimonio3 !== 0 ? patrimonio3 : activos - pasivos;
+
       return { activos, pasivos, patrimonio };
     },
   });
