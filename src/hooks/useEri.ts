@@ -29,10 +29,7 @@ export function usePlanPyg() {
   return useQuery({
     queryKey: ["plan_pyg"],
     queryFn: async (): Promise<PlanPygRow[]> => {
-      const { data, error } = await supabase
-        .from("plan_pyg")
-        .select("*")
-        .order("orden", { ascending: true });
+      const { data, error } = await supabase.from("plan_pyg").select("*").order("orden", { ascending: true });
       if (error) throw error;
       return (data ?? []) as PlanPygRow[];
     },
@@ -63,50 +60,37 @@ export interface EriCompactRow {
   valor_pyg: number;
 }
 
-export function useEriAllMonths(filtros: {
-  año: number | "Todas";
-  compania: string;
-  ccKey: string;
-}) {
+export function useEriAllMonths(filtros: { año: number | "Todas"; compania: string; ccKey: string }) {
   return useQuery({
     queryKey: ["eri-all-months", filtros],
     queryFn: async (): Promise<EriCompactRow[]> => {
       let q = supabase.from("v_eri_por_mes").select("*");
       if (filtros.año !== "Todas") {
-        q = q
-          .gte("año_mes_num", filtros.año * 100 + 1)
-          .lte("año_mes_num", filtros.año * 100 + 12);
+        q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
       }
       if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
       if (filtros.ccKey !== "TODOS") q = q.eq("cc_key", filtros.ccKey);
       const { data, error } = await q
         .order("orden", { ascending: true })
-        .order("año_mes_num", { ascending: true });
+        .order("cc_key", { ascending: true })
+        .limit(10000);
       if (error) throw error;
       return (data ?? []) as unknown as EriCompactRow[];
     },
   });
 }
 
-export function useEriAllCC(filtros: {
-  año: number | "Todas";
-  compania: string;
-  mes: number | "Todos";
-}) {
+export function useEriAllCC(filtros: { año: number | "Todas"; compania: string; mes: number | "Todos" }) {
   return useQuery({
     queryKey: ["eri-all-cc", filtros],
     queryFn: async (): Promise<EriCompactRow[]> => {
       let q = supabase.from("v_eri_por_mes").select("*");
       if (filtros.año !== "Todas") {
-        q = q
-          .gte("año_mes_num", filtros.año * 100 + 1)
-          .lte("año_mes_num", filtros.año * 100 + 12);
+        q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
       }
       if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
       if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
-      const { data, error } = await q
-        .order("orden", { ascending: true })
-        .order("cc_key", { ascending: true });
+      const { data, error } = await q.order("orden", { ascending: true }).order("cc_key", { ascending: true });
       if (error) throw error;
       return (data ?? []) as unknown as EriCompactRow[];
     },
@@ -139,9 +123,7 @@ export function useGastosTercero(filtros: {
     queryFn: async (): Promise<GastoTerceroRow[]> => {
       let q = supabase.from("v_gastos_por_tercero").select("*");
       if (filtros.año !== "Todas") {
-        q = q
-          .gte("año_mes_num", filtros.año * 100 + 1)
-          .lte("año_mes_num", filtros.año * 100 + 12);
+        q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
       }
       if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
       if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
@@ -153,19 +135,13 @@ export function useGastosTercero(filtros: {
   });
 }
 
-export function useGastosPorCC(filtros: {
-  año: number | "Todas";
-  mes: number | "Todos";
-  compania: string;
-}) {
+export function useGastosPorCC(filtros: { año: number | "Todas"; mes: number | "Todos"; compania: string }) {
   return useQuery({
     queryKey: ["gastos-por-cc", filtros],
     queryFn: async (): Promise<GastoTerceroRow[]> => {
       let q = supabase.from("v_gastos_por_tercero").select("*");
       if (filtros.año !== "Todas") {
-        q = q
-          .gte("año_mes_num", filtros.año * 100 + 1)
-          .lte("año_mes_num", filtros.año * 100 + 12);
+        q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
       }
       if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
       if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
