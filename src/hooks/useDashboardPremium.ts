@@ -86,48 +86,22 @@ export function useKpisMesAMes(filtros: FiltroDashboard) {
       let q = supabase.from("v_kpis_mes_a_mes").select("*").order("año_mes_num", { ascending: true });
       const range = buildPeriodoRange(filtros.año, filtros.mes);
       if (range) q = q.gte("año_mes_num", range.min).lte("año_mes_num", range.max);
-      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+
+      // "Todas" → usar fila GRUPO consolidada
+      // Empresa específica → filtrar por esa empresa
+      if (filtros.compania === "Todas") {
+        q = q.eq("compania", "GRUPO");
+      } else {
+        q = q.eq("compania", filtros.compania);
+      }
+
       const { data, error } = await q;
       if (error) throw error;
 
-      // ── Consolidar por mes sumando todas las empresas ────────────────────
-      // Los porcentajes NO se promedian — se recalculan desde los valores sumados
-      const map = new Map<number, KpiMesRow>();
+      // Ya no necesitamos agregar — la vista ya viene consolidada
+      const arr = ((data ?? []) as KpiMesRow[]).sort((a, b) => a.año_mes_num - b.año_mes_num);
 
-      for (const r of (data ?? []) as KpiMesRow[]) {
-        const key = r.año_mes_num;
-        const existing = map.get(key);
-
-        if (!existing) {
-          // Primera empresa del mes — guardar valores absolutos tal cual
-          map.set(key, {
-            ...r,
-            compania: filtros.compania === "Todas" ? "Grupo" : r.compania,
-            mes_label: r.mes_label || buildLabel(key),
-          });
-        } else {
-          // Sumar valores absolutos — los porcentajes se recalculan al final
-          existing.ingresos += Number(r.ingresos) || 0;
-          existing.costos += Number(r.costos) || 0;
-          existing.gastos_adm += Number(r.gastos_adm) || 0;
-          existing.gastos_oper += Number(r.gastos_oper) || 0;
-          existing.gastos_fin += Number(r.gastos_fin) || 0;
-          existing.utilidad_bruta += Number(r.utilidad_bruta) || 0;
-          existing.utilidad_operacional += Number(r.utilidad_operacional) || 0;
-          existing.utilidad_neta += Number(r.utilidad_neta) || 0;
-          existing.activos_totales += Number(r.activos_totales) || 0;
-          existing.pasivos_totales += Number(r.pasivos_totales) || 0;
-          existing.patrimonio_total += Number(r.patrimonio_total) || 0;
-        }
-      }
-      // ────────────────────────────────────────────────────────────────────
-
-      // Recalcular porcentajes desde valores consolidados
-      let arr = Array.from(map.values())
-        .map(recomputePcts)
-        .sort((a, b) => a.año_mes_num - b.año_mes_num);
-
-      // Recalcular deltas mes a mes desde la serie consolidada
+      // Recalcular deltas
       for (let i = 0; i < arr.length; i++) {
         const cur = arr[i];
         const prev = i > 0 ? arr[i - 1] : null;
