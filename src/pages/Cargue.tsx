@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import AppLayout from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
-import { Upload, FileSpreadsheet, CheckCircle2, AlertTriangle, Loader2, X } from "lucide-react";
+import { Upload, FileSpreadsheet, CheckCircle2, AlertTriangle, Loader2, X, AlertCircle } from "lucide-react";
 import { useEmpresas } from "@/hooks/useEmpresas";
 import { parseWorkbook, formatBytes, rowToInsert, type ParsedRow } from "@/lib/parseAuxiliar";
 import { supabase } from "@/lib/external-supabase";
@@ -27,6 +27,7 @@ export default function Cargue() {
   const [insertedCount, setInsertedCount] = useState(0);
   const [skippedCount, setSkippedCount] = useState(0);
   const [insertError, setInsertError] = useState<string | null>(null);
+  const [showDuplicadosConfirm, setShowDuplicadosConfirm] = useState(false);
 
   const stats = useMemo(() => {
     const total = rows.length;
@@ -83,15 +84,15 @@ export default function Cargue() {
     }
   };
 
-  const handleConfirmImport = async () => {
+  // ignoreDuplicates = true  → comportamiento normal, omite duplicados
+  // ignoreDuplicates = false → sobreescribe duplicados existentes
+  const handleConfirmImport = async (ignoreDuplicates: boolean = true) => {
     if (!file) return;
     setStep("processing");
     setInsertError(null);
+    setShowDuplicadosConfirm(false);
 
     try {
-      console.log("[Cargue] Using Supabase client URL:", (supabase as any).supabaseUrl);
-
-      // 1. Insert archivo record
       const archivoPayload = {
         nombre_archivo: file.name,
         compania: empresaSeleccionada?.nombre ?? null,
@@ -100,24 +101,15 @@ export default function Cargue() {
         filas_rechazadas: stats.invalid,
         estado: "OK",
       };
-      console.log("[Cargue] Inserting archivo:", archivoPayload);
       const { data: archivoRow, error: archivoErr } = await supabase
         .from("archivos_cargados")
         .insert(archivoPayload)
         .select("id")
         .maybeSingle();
 
-      const archivoId: string | undefined =
-        archivoErr || !archivoRow ? undefined : (archivoRow as { id: string }).id;
+      const archivoId: string | undefined = archivoErr || !archivoRow ? undefined : (archivoRow as { id: string }).id;
 
-      if (archivoErr) {
-        console.error("[Cargue] archivos_cargados insert failed:", archivoErr);
-      }
-
-      // 2. Insert movimientos in batches
       const validRows = rows.filter((r) => r.valid).map((r) => rowToInsert(r, archivoId));
-      console.log("[Cargue] First row to insert:", validRows[0]);
-      console.log("[Cargue] Total valid rows:", validRows.length);
 
       const failed: { batchStart: number; error: string; code?: string; details?: string; hint?: string }[] = [];
       const BATCH = 500;
@@ -131,18 +123,10 @@ export default function Cargue() {
             .from("movimientos")
             .upsert(chunk, {
               onConflict: "compania,cuenta_key,fecha_key,cc_key,comprobante,debito,credito,concepto",
-              ignoreDuplicates: true,
+              ignoreDuplicates,
             })
             .select("id");
           if (error) {
-            console.error("[Cargue] Batch insert error:", {
-              code: error.code,
-              message: error.message,
-              details: error.details,
-              hint: error.hint,
-              batchStart: i,
-              sampleRow: chunk[0],
-            });
             failed.push({
               batchStart: i,
               error: error.message,
@@ -156,7 +140,6 @@ export default function Cargue() {
             skipped += chunk.length - insertedInChunk;
           }
         } catch (batchErr: any) {
-          console.error("[Cargue] Batch threw exception:", batchErr);
           failed.push({ batchStart: i, error: batchErr?.message ?? String(batchErr) });
         }
       }
@@ -173,7 +156,7 @@ export default function Cargue() {
           first.hint ? `Sugerencia: ${first.hint}` : null,
         ].filter(Boolean);
         setInsertError(
-          `No se pudo importar ningún registro.\n${detailParts.join("\n")}\n(${failed.length} lote(s) fallaron)`
+          `No se pudo importar ningún registro.\n${detailParts.join("\n")}\n(${failed.length} lote(s) fallaron)`,
         );
         setStep("preview");
         return;
@@ -185,7 +168,6 @@ export default function Cargue() {
 
       setStep("success");
     } catch (err: any) {
-      console.error("[Cargue] Unexpected error:", err);
       setInsertError(`Error inesperado: ${err?.message ?? String(err)}`);
       setStep("preview");
     }
@@ -197,6 +179,7 @@ export default function Cargue() {
     setInsertedCount(0);
     setSkippedCount(0);
     setInsertError(null);
+    setShowDuplicadosConfirm(false);
     setStep("upload");
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -256,9 +239,7 @@ export default function Cargue() {
           )}
 
           <div className="rounded-md border border-border bg-card p-4">
-            <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              Empresa
-            </label>
+            <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Empresa</label>
             <select
               value={empresaId}
               onChange={(e) => setEmpresaId(e.target.value)}
@@ -287,7 +268,11 @@ export default function Cargue() {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <StatCard label="Total filas" value={stats.total.toLocaleString("es-CO")} />
             <StatCard label="Válidas" value={stats.valid.toLocaleString("es-CO")} tone="good" />
-            <StatCard label="Con errores" value={stats.invalid.toLocaleString("es-CO")} tone={stats.invalid > 0 ? "bad" : "good"} />
+            <StatCard
+              label="Con errores"
+              value={stats.invalid.toLocaleString("es-CO")}
+              tone={stats.invalid > 0 ? "bad" : "good"}
+            />
           </div>
 
           {stats.errorRate > 0.2 && (
@@ -306,10 +291,52 @@ export default function Cargue() {
 
           <ErrorViewer rows={rows} onRowsChange={setRows} />
 
+          {/* Confirmación de sobreescritura de duplicados */}
+          {showDuplicadosConfirm && (
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-4 space-y-3">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-amber-500">¿Estás seguro de sobreescribir los duplicados?</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Los registros que ya existen en la base de datos serán actualizados con los valores del archivo.
+                    Esta acción no se puede deshacer.
+                  </p>
+                </div>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button variant="outline" size="sm" onClick={() => setShowDuplicadosConfirm(false)}>
+                  Cancelar
+                </Button>
+                <Button
+                  size="sm"
+                  className="bg-amber-500 hover:bg-amber-600 text-white gap-2"
+                  onClick={() => handleConfirmImport(false)}
+                >
+                  <AlertCircle className="h-4 w-4" />
+                  Sí, sobreescribir duplicados
+                </Button>
+              </div>
+            </div>
+          )}
+
           <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={reset}>Cancelar</Button>
+            <Button variant="outline" onClick={reset}>
+              Cancelar
+            </Button>
+            {!showDuplicadosConfirm && (
+              <Button
+                variant="outline"
+                onClick={() => setShowDuplicadosConfirm(true)}
+                disabled={stats.valid === 0}
+                className="gap-2 border-amber-500/50 text-amber-500 hover:bg-amber-500/10"
+              >
+                <AlertCircle className="h-4 w-4" />
+                Importar con duplicados
+              </Button>
+            )}
             <Button
-              onClick={handleConfirmImport}
+              onClick={() => handleConfirmImport(true)}
               disabled={stats.errorRate > 0.2 || stats.valid === 0}
               className="gap-2"
             >
@@ -332,22 +359,32 @@ export default function Cargue() {
           <CheckCircle2 className="h-16 w-16 text-success" />
           <h2 className="mt-4 text-2xl font-bold text-foreground">¡Importación exitosa!</h2>
           <div className="mt-4 grid w-full max-w-md grid-cols-1 gap-2 sm:grid-cols-3">
-            <div className="rounded-md border border-success/30 bg-success/10 p-3">
+            <div className="rounded-md border border-success/30 bg-success/10 p3">
               <div className="text-[11px] font-semibold uppercase tracking-wider text-success">Importados</div>
-              <div className="mt-1 text-xl font-bold text-success tabular-nums">{insertedCount.toLocaleString("es-CO")}</div>
+              <div className="mt-1 text-xl font-bold text-success tabular-nums">
+                {insertedCount.toLocaleString("es-CO")}
+              </div>
             </div>
             <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-500">Duplicados omitidos</div>
-              <div className="mt-1 text-xl font-bold text-amber-500 tabular-nums">{skippedCount.toLocaleString("es-CO")}</div>
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-500">
+                Duplicados omitidos
+              </div>
+              <div className="mt-1 text-xl font-bold text-amber-500 tabular-nums">
+                {skippedCount.toLocaleString("es-CO")}
+              </div>
             </div>
             <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3">
               <div className="text-[11px] font-semibold uppercase tracking-wider text-destructive">Con errores</div>
-              <div className="mt-1 text-xl font-bold text-destructive tabular-nums">{stats.invalid.toLocaleString("es-CO")}</div>
+              <div className="mt-1 text-xl font-bold text-destructive tabular-nums">
+                {stats.invalid.toLocaleString("es-CO")}
+              </div>
             </div>
           </div>
           <div className="mt-6 flex gap-3">
             <Button onClick={() => navigate("/dashboard")}>Ver en Dashboard</Button>
-            <Button variant="outline" onClick={reset}>Cargar otro archivo</Button>
+            <Button variant="outline" onClick={reset}>
+              Cargar otro archivo
+            </Button>
           </div>
         </div>
       )}
@@ -355,13 +392,21 @@ export default function Cargue() {
   );
 }
 
-function StatCard({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "good" | "bad" | "neutral" }) {
+function StatCard({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  label: string;
+  value: string;
+  tone?: "good" | "bad" | "neutral";
+}) {
   const cls =
     tone === "good"
       ? "border-success/30 text-success"
       : tone === "bad"
-      ? "border-destructive/30 text-destructive"
-      : "border-border text-foreground";
+        ? "border-destructive/30 text-destructive"
+        : "border-border text-foreground";
   return (
     <div className={`rounded-md border bg-card p-4 ${cls}`}>
       <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
@@ -390,8 +435,8 @@ function Stepper({ step }: { step: Step }) {
                 active
                   ? "bg-primary text-primary-foreground"
                   : done
-                  ? "bg-success/20 text-success"
-                  : "bg-secondary text-muted-foreground"
+                    ? "bg-success/20 text-success"
+                    : "bg-secondary text-muted-foreground"
               }`}
             >
               {it.label}
