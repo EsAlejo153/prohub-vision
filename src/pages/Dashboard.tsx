@@ -9,9 +9,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
 } from "recharts";
 import { useFiltros } from "@/context/FiltrosContext";
 import {
@@ -62,7 +59,7 @@ const formatPctV = (val: number | null | undefined) => {
 const deltaArrow = (v: number | null | undefined) => (v == null ? "=" : v >= 0 ? "↑" : "↓");
 const deltaColor = (v: number | null | undefined) => (v == null ? C.textDim : v >= 0 ? C.positive : C.negative);
 
-// ===== Smooth sparkline (catmull-rom spline -> bezier) =====
+// ===== Smooth sparkline =====
 function smoothPath(points: Array<[number, number]>): string {
   if (points.length === 0) return "";
   if (points.length === 1) return `M ${points[0][0]} ${points[0][1]}`;
@@ -89,7 +86,6 @@ function Sparkline({ values, color, gradId }: { values: number[]; color: string;
   const max = Math.max(...values.map((v) => Math.abs(v))) || 1;
   const points: Array<[number, number]> = values.map((v, i) => {
     const x = (i / (values.length - 1)) * w;
-    // Map sign-aware: positive up, negative down, baseline center.
     const y = h - ((v / max) * (h / 2 - pad) + h / 2);
     return [x, y];
   });
@@ -153,13 +149,7 @@ function HeroCard({
       }}
     >
       <div
-        style={{
-          fontSize: 10,
-          textTransform: "uppercase",
-          letterSpacing: "0.08em",
-          color: C.textDim,
-          fontWeight: 500,
-        }}
+        style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.08em", color: C.textDim, fontWeight: 500 }}
       >
         {label}
       </div>
@@ -175,14 +165,7 @@ function HeroCard({
       >
         {value}
       </div>
-      <div
-        style={{
-          marginTop: 6,
-          fontSize: 11,
-          color: deltaColor(delta),
-          fontVariantNumeric: "tabular-nums",
-        }}
-      >
+      <div style={{ marginTop: 6, fontSize: 11, color: deltaColor(delta), fontVariantNumeric: "tabular-nums" }}>
         {deltaArrow(delta)} {delta == null ? "—" : `${Math.abs(delta).toFixed(1)}%`}
         {prevLabel && <span style={{ color: C.textDim }}> vs {prevLabel}</span>}
       </div>
@@ -267,23 +250,41 @@ export default function Dashboard() {
   const last = rows.length ? rows[rows.length - 1] : null;
   const prevLabel = rows.length >= 2 ? rows[rows.length - 2].mes_label : null;
 
-  // Aggregates from kpis-mes-a-mes
+  // ✅ FIX: balance es stock (saldo), NO se suma — solo último mes
   const totals = useMemo(() => {
     const sum = (k: keyof KpiMesRow) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
 
-    // El último mes tiene el saldo vigente de balance (es stock, no se acumula)
+    // Último mes = saldo vigente de balance (no acumular)
     const lastRow = rows.length ? rows[rows.length - 1] : null;
 
     return {
       ingresos: sum("ingresos"),
       utilOper: sum("utilidad_operacional"),
       utilNeta: sum("utilidad_neta"),
-      // ✅ Balance: solo último mes, nunca sumar
+      // Balance: solo el último mes disponible
       activos: lastRow ? Number(lastRow.activos_totales) || 0 : 0,
       pasivos: lastRow ? Number(lastRow.pasivos_totales) || 0 : 0,
       patrimonio: lastRow ? Number(lastRow.patrimonio_total) || 0 : 0,
     };
   }, [rows]);
+
+  // useBalanceFallback ya corregido para traer solo el último mes
+  const { data: balFallback } = useBalanceFallback(filtros, true);
+
+  // Usar fallback solo si trae valores distintos de cero (más confiable)
+  const balance =
+    balFallback && (balFallback.activos !== 0 || balFallback.pasivos !== 0 || balFallback.patrimonio !== 0)
+      ? balFallback
+      : { activos: totals.activos, pasivos: totals.pasivos, patrimonio: totals.patrimonio };
+
+  const sparks = useMemo(
+    () => ({
+      ingresos: rows.map((r) => Number(r.ingresos) || 0),
+      utilOper: rows.map((r) => Number(r.utilidad_operacional) || 0),
+      utilNeta: rows.map((r) => Number(r.utilidad_neta) || 0),
+    }),
+    [rows],
+  );
 
   const chartData = useMemo(
     () =>
@@ -295,7 +296,6 @@ export default function Dashboard() {
     [rows],
   );
 
-  // Distribución gastos averaged across filtered months
   const dist = useMemo(() => {
     if (!distRows.length) return { adm: 0, oper: 0, fin: 0, costos: 0 };
     const avg = (k: keyof (typeof distRows)[number]) =>
@@ -308,7 +308,6 @@ export default function Dashboard() {
     };
   }, [distRows]);
 
-  // Top cuentas — group by cuenta_key (with fallbacks to cuenta_codigo)
   const topAgg = useMemo(() => {
     const map = new Map<string, { nombre: string; total: number }>();
     for (const r of topRows as any[]) {
@@ -333,7 +332,7 @@ export default function Dashboard() {
   const margenBruto = last?.margen_bruto_pct ?? 0;
   const margenNeto = last?.margen_neto_pct ?? 0;
   const costoIngreso = last?.costo_ingreso_pct ?? 0;
-  // Derive from balance directly (avoids $0 from view)
+
   const safeDiv = (a: number, b: number) => (b === 0 ? 0 : (a / b) * 100);
   const endeudamiento =
     balance.activos !== 0
@@ -384,13 +383,13 @@ export default function Dashboard() {
         ) : (
           <>
             {/* ROW 1 — Hero KPIs */}
-            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))", flex: "0 0 auto" }}>
+            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
               <HeroCard
                 label="Ingresos operativos"
                 value={formatM(totals.ingresos)}
                 delta={last?.delta_ingresos_pct ?? null}
                 prevLabel={prevLabel}
-                sub={`Acumulado ${rows[0]?.mes_label}–${last?.mes_label} ${filtros.año === "Todas" ? "" : filtros.año}`}
+                sub={`Acumulado ${rows[0]?.mes_label}–${last?.mes_label} ${filtros.año === "Todas" ? "2026" : filtros.año}`}
                 sparkValues={sparks.ingresos}
                 sparkColor={C.blue}
                 gradId="sp-ing"
@@ -421,7 +420,7 @@ export default function Dashboard() {
             </div>
 
             {/* ROW 2 — Ratios */}
-            <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))", flex: "0 0 auto" }}>
+            <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
               <RatioCard
                 label="Margen bruto %"
                 value={formatPctV(margenBruto)}
@@ -863,6 +862,8 @@ export default function Dashboard() {
   );
 }
 
+// ===== Sub-components =====
+
 function BalanceRow({
   label,
   value,
@@ -908,18 +909,6 @@ function BalanceRow({
   );
 }
 
-function SolvRow({ label, value, good }: { label: string; value: number; good: (v: number) => boolean }) {
-  const color = good(value) ? C.positive : C.negative;
-  return (
-    <div className="flex items-center justify-between py-1.5">
-      <span style={{ fontSize: 11, color: C.textMuted }}>{label}</span>
-      <span style={{ fontSize: 13, color, fontVariantNumeric: "tabular-nums", fontWeight: 500 }}>
-        {formatPctV(value)}
-      </span>
-    </div>
-  );
-}
-
 function DistRow({ label, pct, color }: { label: string; pct: number; color: string }) {
   const safe = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
   return (
@@ -930,15 +919,7 @@ function DistRow({ label, pct, color }: { label: string; pct: number; color: str
           {safe.toFixed(1)}%
         </span>
       </div>
-      <div
-        style={{
-          marginTop: 4,
-          height: 8,
-          background: C.cardBorder,
-          borderRadius: 2,
-          overflow: "hidden",
-        }}
-      >
+      <div style={{ marginTop: 4, height: 8, background: C.cardBorder, borderRadius: 2, overflow: "hidden" }}>
         <div style={{ width: `${safe}%`, height: "100%", background: color, borderRadius: 2 }} />
       </div>
     </div>
@@ -1034,15 +1015,7 @@ function GaugeCard({
           fill={color}
         />
       </svg>
-      <div
-        style={{
-          fontSize: 18,
-          fontWeight: 700,
-          color,
-          marginTop: 2,
-          fontVariantNumeric: "tabular-nums",
-        }}
-      >
+      <div style={{ fontSize: 18, fontWeight: 700, color, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
         {safe.toFixed(1)}
         {unit}
       </div>
