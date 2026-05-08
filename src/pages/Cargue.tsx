@@ -13,7 +13,7 @@ type Step = "upload" | "preview" | "processing" | "success";
 
 const ACCEPTED = [".xls", ".xlsx"];
 
-// Clave única igual al constraint de la BD
+// Clave para detección de duplicados contra la BD (mismos campos que antes tenía el constraint)
 function rowKey(r: ReturnType<typeof rowToInsert>): string {
   return [r.compania, r.cuenta_key, r.fecha_key, r.cc_key, r.comprobante, r.debito, r.credito, r.concepto].join("||");
 }
@@ -31,7 +31,6 @@ export default function Cargue() {
   const [rows, setRows] = useState<ParsedRow[]>([]);
   const [insertedCount, setInsertedCount] = useState(0);
   const [skippedCount, setSkippedCount] = useState(0);
-  const [dupCount, setDupCount] = useState(0);
   const [insertError, setInsertError] = useState<string | null>(null);
   const [showDuplicadosConfirm, setShowDuplicadosConfirm] = useState(false);
 
@@ -91,12 +90,17 @@ export default function Cargue() {
   };
 
   /**
-   * ignoreDuplicates = true  → omite duplicados contra la BD (comportamiento normal)
-   * ignoreDuplicates = false → sobreescribe duplicados contra la BD (forzar importación)
-   * En ambos casos deduplicamos primero las filas del propio archivo para evitar el error
-   * "ON CONFLICT DO UPDATE command cannot affect row a second time"
+   * forzarDuplicados = false (modo normal):
+   *   - Consulta la BD para saber qué claves ya existen
+   *   - Solo inserta las filas que NO están en la BD
+   *   - Omite silenciosamente los duplicados contra la BD
+   *
+   * forzarDuplicados = true (modo forzado, autorizado por el usuario):
+   *   - Inserta TODAS las filas del archivo tal como están
+   *   - Incluye filas idénticas entre sí y contra la BD
+   *   - El usuario asumió la responsabilidad de la duplicidad
    */
-  const handleConfirmImport = async (ignoreDuplicates: boolean = true) => {
+  const handleConfirmImport = async (forzarDuplicados: boolean = false) => {
     if (!file) return;
     setStep("processing");
     setInsertError(null);
@@ -119,42 +123,62 @@ export default function Cargue() {
 
       const archivoId: string | undefined = archivoErr || !archivoRow ? undefined : (archivoRow as { id: string }).id;
 
-      // Mapear todas las filas válidas
       const allRows = rows.filter((r) => r.valid).map((r) => rowToInsert(r, archivoId));
 
-      // ── Deduplicar filas del propio archivo ──────────────────────────────────
-      // Cuando hay duplicados internos, nos quedamos con la ÚLTIMA ocurrencia
-      // (igual que si el archivo tuviera una corrección al final)
-      const dedupMap = new Map<string, (typeof allRows)[number]>();
-      for (const r of allRows) {
-        dedupMap.set(rowKey(r), r);
-      }
-      const internalDups = allRows.length - dedupMap.size;
-      const dedupedRows = Array.from(dedupMap.values());
-      // ────────────────────────────────────────────────────────────────────────
-
-      const failed: { batchStart: number; error: string; code?: string }[] = [];
-      const BATCH = 500;
-      let inserted = 0;
+      let rowsToInsert = allRows;
       let skipped = 0;
 
-      for (let i = 0; i < dedupedRows.length; i += BATCH) {
-        const chunk = dedupedRows.slice(i, i + BATCH);
+      if (!forzarDuplicados) {
+        // ── Modo normal: detectar duplicados contra la BD ──────────────────
+        // Construimos las claves de todas las filas del archivo
+        const keys = allRows.map(rowKey);
+
+        // Consultamos la BD buscando registros con esas mismas claves
+        // Lo hacemos en batches para no exceder límites de URL
+        const existingKeys = new Set<string>();
+        const KEY_BATCH = 200;
+
+        for (let i = 0; i < allRows.length; i += KEY_BATCH) {
+          const batch = allRows.slice(i, i + KEY_BATCH);
+          // Consultamos por compania+cuenta_key+fecha_key+cc_key+comprobante+debito+credito+concepto
+          for (const r of batch) {
+            const { data } = await supabase
+              .from("movimientos")
+              .select("id")
+              .eq("compania", r.compania ?? "")
+              .eq("cuenta_key", r.cuenta_key ?? "")
+              .eq("fecha_key", r.fecha_key ?? "")
+              .eq("cc_key", r.cc_key ?? "")
+              .eq("comprobante", r.comprobante ?? "")
+              .eq("debito", r.debito ?? 0)
+              .eq("credito", r.credito ?? 0)
+              .eq("concepto", r.concepto ?? "")
+              .limit(1);
+            if (data && data.length > 0) existingKeys.add(rowKey(r));
+          }
+        }
+
+        rowsToInsert = allRows.filter((r) => !existingKeys.has(rowKey(r)));
+        skipped = allRows.length - rowsToInsert.length;
+        // ──────────────────────────────────────────────────────────────────
+      }
+
+      const failed: { batchStart: number; error: string }[] = [];
+      const BATCH = 500;
+      let inserted = 0;
+
+      for (let i = 0; i < rowsToInsert.length; i += BATCH) {
+        const chunk = rowsToInsert.slice(i, i + BATCH);
         try {
           const { data, error } = await supabase
             .from("movimientos")
-            .upsert(chunk, {
-              onConflict: "compania,cuenta_key,fecha_key,cc_key,comprobante,debito,credito,concepto",
-              ignoreDuplicates,
-            })
+            .insert(chunk) // INSERT directo, sin upsert — ya no hay constraint único
             .select("id");
 
           if (error) {
-            failed.push({ batchStart: i, error: error.message, code: error.code });
+            failed.push({ batchStart: i, error: error.message });
           } else {
-            const insertedInChunk = Array.isArray(data) ? data.length : 0;
-            inserted += insertedInChunk;
-            skipped += chunk.length - insertedInChunk;
+            inserted += Array.isArray(data) ? data.length : chunk.length;
           }
         } catch (batchErr: any) {
           failed.push({ batchStart: i, error: batchErr?.message ?? String(batchErr) });
@@ -163,7 +187,6 @@ export default function Cargue() {
 
       setInsertedCount(inserted);
       setSkippedCount(skipped);
-      setDupCount(internalDups);
 
       if (failed.length > 0 && inserted === 0) {
         setInsertError(
@@ -189,7 +212,6 @@ export default function Cargue() {
     setRows([]);
     setInsertedCount(0);
     setSkippedCount(0);
-    setDupCount(0);
     setInsertError(null);
     setShowDuplicadosConfirm(false);
     setStep("upload");
@@ -303,17 +325,18 @@ export default function Cargue() {
 
           <ErrorViewer rows={rows} onRowsChange={setRows} />
 
-          {/* Confirmación sobreescritura */}
+          {/* Confirmación importar con duplicados */}
           {showDuplicadosConfirm && (
             <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-4 space-y-3">
               <div className="flex items-start gap-3">
                 <AlertCircle className="h-5 w-5 text-amber-500 flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-sm font-semibold text-amber-500">¿Estás seguro de sobreescribir los duplicados?</p>
+                  <p className="text-sm font-semibold text-amber-500">¿Confirmas la importación con duplicados?</p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Los registros que ya existen en la base de datos serán actualizados con los valores del archivo. Las
-                    filas duplicadas dentro del mismo archivo se consolidan automáticamente (se conserva la última).
-                    Esta acción no se puede deshacer.
+                    Se insertarán{" "}
+                    <strong className="text-amber-400">todas las {stats.valid.toLocaleString("es-CO")} filas</strong>{" "}
+                    del archivo, incluyendo las que ya existen en la base de datos y las que son idénticas entre sí.
+                    Esto puede generar registros duplicados. Esta acción no se puede deshacer.
                   </p>
                 </div>
               </div>
@@ -324,10 +347,10 @@ export default function Cargue() {
                 <Button
                   size="sm"
                   className="bg-amber-500 hover:bg-amber-600 text-white gap-2"
-                  onClick={() => handleConfirmImport(false)}
+                  onClick={() => handleConfirmImport(true)}
                 >
                   <AlertCircle className="h-4 w-4" />
-                  Sí, sobreescribir duplicados
+                  Sí, insertar todo incluyendo duplicados
                 </Button>
               </div>
             </div>
@@ -349,7 +372,7 @@ export default function Cargue() {
               </Button>
             )}
             <Button
-              onClick={() => handleConfirmImport(true)}
+              onClick={() => handleConfirmImport(false)}
               disabled={stats.errorRate > 0.2 || stats.valid === 0}
               className="gap-2"
             >
@@ -371,23 +394,19 @@ export default function Cargue() {
         <div className="mt-6 flex flex-col items-center justify-center rounded-lg border border-success/30 bg-success/5 p-12 text-center">
           <CheckCircle2 className="h-16 w-16 text-success" />
           <h2 className="mt-4 text-2xl font-bold text-foreground">¡Importación exitosa!</h2>
-          <div className="mt-4 grid w-full max-w-md grid-cols-1 gap-2 sm:grid-cols-4">
+          <div className="mt-4 grid w-full max-w-md grid-cols-1 gap-2 sm:grid-cols-3">
             <div className="rounded-md border border-success/30 bg-success/10 p-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-success">Importados</div>
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-success">Insertados</div>
               <div className="mt-1 text-xl font-bold text-success tabular-nums">
                 {insertedCount.toLocaleString("es-CO")}
               </div>
             </div>
             <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-500">Omitidos BD</div>
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-500">
+                Duplicados omitidos
+              </div>
               <div className="mt-1 text-xl font-bold text-amber-500 tabular-nums">
                 {skippedCount.toLocaleString("es-CO")}
-              </div>
-            </div>
-            <div className="rounded-md border border-blue-500/30 bg-blue-500/10 p-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-blue-400">Dups archivo</div>
-              <div className="mt-1 text-xl font-bold text-blue-400 tabular-nums">
-                {dupCount.toLocaleString("es-CO")}
               </div>
             </div>
             <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3">
