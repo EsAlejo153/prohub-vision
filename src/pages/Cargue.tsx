@@ -13,7 +13,6 @@ type Step = "upload" | "preview" | "processing" | "success";
 
 const ACCEPTED = [".xls", ".xlsx"];
 
-// Clave para detección de duplicados contra la BD (mismos campos que antes tenía el constraint)
 function rowKey(r: ReturnType<typeof rowToInsert>): string {
   return [r.compania, r.cuenta_key, r.fecha_key, r.cc_key, r.comprobante, r.debito, r.credito, r.concepto].join("||");
 }
@@ -33,6 +32,7 @@ export default function Cargue() {
   const [skippedCount, setSkippedCount] = useState(0);
   const [insertError, setInsertError] = useState<string | null>(null);
   const [showDuplicadosConfirm, setShowDuplicadosConfirm] = useState(false);
+  const [progressMsg, setProgressMsg] = useState("");
 
   const stats = useMemo(() => {
     const total = rows.length;
@@ -89,22 +89,12 @@ export default function Cargue() {
     }
   };
 
-  /**
-   * forzarDuplicados = false (modo normal):
-   *   - Consulta la BD para saber qué claves ya existen
-   *   - Solo inserta las filas que NO están en la BD
-   *   - Omite silenciosamente los duplicados contra la BD
-   *
-   * forzarDuplicados = true (modo forzado, autorizado por el usuario):
-   *   - Inserta TODAS las filas del archivo tal como están
-   *   - Incluye filas idénticas entre sí y contra la BD
-   *   - El usuario asumió la responsabilidad de la duplicidad
-   */
   const handleConfirmImport = async (forzarDuplicados: boolean = false) => {
     if (!file) return;
     setStep("processing");
     setInsertError(null);
     setShowDuplicadosConfirm(false);
+    setProgressMsg(forzarDuplicados ? "Insertando todos los registros…" : "Verificando duplicados…");
 
     try {
       const archivoPayload = {
@@ -129,39 +119,45 @@ export default function Cargue() {
       let skipped = 0;
 
       if (!forzarDuplicados) {
-        // ── Modo normal: detectar duplicados contra la BD ──────────────────
-        // Construimos las claves de todas las filas del archivo
-        const keys = allRows.map(rowKey);
-
-        // Consultamos la BD buscando registros con esas mismas claves
-        // Lo hacemos en batches para no exceder límites de URL
+        // ── Detección eficiente de duplicados en batch ──────────────────────
+        // Agrupamos por fecha_key+compania y hacemos una sola query por grupo
+        // Esto reduce miles de queries a unas pocas decenas
         const existingKeys = new Set<string>();
-        const KEY_BATCH = 200;
 
-        for (let i = 0; i < allRows.length; i += KEY_BATCH) {
-          const batch = allRows.slice(i, i + KEY_BATCH);
-          // Consultamos por compania+cuenta_key+fecha_key+cc_key+comprobante+debito+credito+concepto
-          for (const r of batch) {
-            const { data } = await supabase
-              .from("movimientos")
-              .select("id")
-              .eq("compania", r.compania ?? "")
-              .eq("cuenta_key", r.cuenta_key ?? "")
-              .eq("fecha_key", r.fecha_key ?? "")
-              .eq("cc_key", r.cc_key ?? "")
-              .eq("comprobante", r.comprobante ?? "")
-              .eq("debito", r.debito ?? 0)
-              .eq("credito", r.credito ?? 0)
-              .eq("concepto", r.concepto ?? "")
-              .limit(1);
-            if (data && data.length > 0) existingKeys.add(rowKey(r));
+        // Agrupar filas por compania+fecha_key para hacer queries eficientes
+        const grupos = new Map<string, typeof allRows>();
+        for (const r of allRows) {
+          const gKey = `${r.compania}||${r.fecha_key}`;
+          if (!grupos.has(gKey)) grupos.set(gKey, []);
+          grupos.get(gKey)!.push(r);
+        }
+
+        let gruposProcesados = 0;
+        const totalGrupos = grupos.size;
+
+        for (const [gKey, grupoRows] of grupos.entries()) {
+          const [compania, fecha_key] = gKey.split("||");
+          setProgressMsg(`Verificando duplicados… (${++gruposProcesados}/${totalGrupos} fechas)`);
+
+          // Traer todos los registros de esa compania+fecha de la BD
+          const { data: bdRows } = await supabase
+            .from("movimientos")
+            .select("cuenta_key, fecha_key, cc_key, comprobante, debito, credito, concepto, compania")
+            .eq("compania", compania ?? "")
+            .eq("fecha_key", fecha_key ?? "");
+
+          // Construir set de claves existentes en BD para este grupo
+          for (const bd of bdRows ?? []) {
+            existingKeys.add(rowKey(bd as any));
           }
         }
 
         rowsToInsert = allRows.filter((r) => !existingKeys.has(rowKey(r)));
         skipped = allRows.length - rowsToInsert.length;
-        // ──────────────────────────────────────────────────────────────────
+        // ───────────────────────────────────────────────────────────────────
       }
+
+      setProgressMsg(`Insertando ${rowsToInsert.length.toLocaleString("es-CO")} registros…`);
 
       const failed: { batchStart: number; error: string }[] = [];
       const BATCH = 500;
@@ -169,11 +165,11 @@ export default function Cargue() {
 
       for (let i = 0; i < rowsToInsert.length; i += BATCH) {
         const chunk = rowsToInsert.slice(i, i + BATCH);
+        setProgressMsg(
+          `Insertando registros… (${Math.min(i + BATCH, rowsToInsert.length).toLocaleString("es-CO")} / ${rowsToInsert.length.toLocaleString("es-CO")})`,
+        );
         try {
-          const { data, error } = await supabase
-            .from("movimientos")
-            .insert(chunk) // INSERT directo, sin upsert — ya no hay constraint único
-            .select("id");
+          const { data, error } = await supabase.from("movimientos").insert(chunk).select("id");
 
           if (error) {
             failed.push({ batchStart: i, error: error.message });
@@ -214,6 +210,7 @@ export default function Cargue() {
     setSkippedCount(0);
     setInsertError(null);
     setShowDuplicadosConfirm(false);
+    setProgressMsg("");
     setStep("upload");
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -325,7 +322,6 @@ export default function Cargue() {
 
           <ErrorViewer rows={rows} onRowsChange={setRows} />
 
-          {/* Confirmación importar con duplicados */}
           {showDuplicadosConfirm && (
             <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-4 space-y-3">
               <div className="flex items-start gap-3">
@@ -336,7 +332,7 @@ export default function Cargue() {
                     Se insertarán{" "}
                     <strong className="text-amber-400">todas las {stats.valid.toLocaleString("es-CO")} filas</strong>{" "}
                     del archivo, incluyendo las que ya existen en la base de datos y las que son idénticas entre sí.
-                    Esto puede generar registros duplicados. Esta acción no se puede deshacer.
+                    Esta acción no se puede deshacer.
                   </p>
                 </div>
               </div>
@@ -383,10 +379,11 @@ export default function Cargue() {
       )}
 
       {step === "processing" && (
-        <div className="mt-6 flex flex-col items-center justify-center rounded-lg border border-border bg-card p-12">
+        <div className="mt-6 flex flex-col items-center justify-center rounded-lg border border-border bg-card p-12 gap-4">
           <Loader2 className="h-12 w-12 animate-spin text-primary" />
-          <h2 className="mt-4 text-lg font-semibold text-foreground">Importando registros…</h2>
-          <p className="mt-1 text-xs text-muted-foreground">No cierres esta ventana.</p>
+          <h2 className="text-lg font-semibold text-foreground">Importando registros…</h2>
+          {progressMsg && <p className="text-xs text-muted-foreground text-center max-w-sm">{progressMsg}</p>}
+          <p className="text-xs text-muted-foreground">No cierres esta ventana.</p>
         </div>
       )}
 
