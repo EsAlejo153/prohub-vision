@@ -13,6 +13,11 @@ type Step = "upload" | "preview" | "processing" | "success";
 
 const ACCEPTED = [".xls", ".xlsx"];
 
+// Clave única igual al constraint de la BD
+function rowKey(r: ReturnType<typeof rowToInsert>): string {
+  return [r.compania, r.cuenta_key, r.fecha_key, r.cc_key, r.comprobante, r.debito, r.credito, r.concepto].join("||");
+}
+
 export default function Cargue() {
   const navigate = useNavigate();
   const empresas = useEmpresas();
@@ -26,6 +31,7 @@ export default function Cargue() {
   const [rows, setRows] = useState<ParsedRow[]>([]);
   const [insertedCount, setInsertedCount] = useState(0);
   const [skippedCount, setSkippedCount] = useState(0);
+  const [dupCount, setDupCount] = useState(0);
   const [insertError, setInsertError] = useState<string | null>(null);
   const [showDuplicadosConfirm, setShowDuplicadosConfirm] = useState(false);
 
@@ -65,7 +71,7 @@ export default function Cargue() {
     try {
       const { rows: parsed, sheetFound } = await parseWorkbook(file);
       if (!sheetFound) {
-        toast.error("No se encontró la hoja 'BD' en el archivo. Verifica el formato.");
+        toast.error("No se encontró la hoja 'BD' en el archivo.");
         setParsing(false);
         return;
       }
@@ -84,8 +90,12 @@ export default function Cargue() {
     }
   };
 
-  // ignoreDuplicates = true  → comportamiento normal, omite duplicados
-  // ignoreDuplicates = false → sobreescribe duplicados existentes
+  /**
+   * ignoreDuplicates = true  → omite duplicados contra la BD (comportamiento normal)
+   * ignoreDuplicates = false → sobreescribe duplicados contra la BD (forzar importación)
+   * En ambos casos deduplicamos primero las filas del propio archivo para evitar el error
+   * "ON CONFLICT DO UPDATE command cannot affect row a second time"
+   */
   const handleConfirmImport = async (ignoreDuplicates: boolean = true) => {
     if (!file) return;
     setStep("processing");
@@ -109,15 +119,27 @@ export default function Cargue() {
 
       const archivoId: string | undefined = archivoErr || !archivoRow ? undefined : (archivoRow as { id: string }).id;
 
-      const validRows = rows.filter((r) => r.valid).map((r) => rowToInsert(r, archivoId));
+      // Mapear todas las filas válidas
+      const allRows = rows.filter((r) => r.valid).map((r) => rowToInsert(r, archivoId));
 
-      const failed: { batchStart: number; error: string; code?: string; details?: string; hint?: string }[] = [];
+      // ── Deduplicar filas del propio archivo ──────────────────────────────────
+      // Cuando hay duplicados internos, nos quedamos con la ÚLTIMA ocurrencia
+      // (igual que si el archivo tuviera una corrección al final)
+      const dedupMap = new Map<string, (typeof allRows)[number]>();
+      for (const r of allRows) {
+        dedupMap.set(rowKey(r), r);
+      }
+      const internalDups = allRows.length - dedupMap.size;
+      const dedupedRows = Array.from(dedupMap.values());
+      // ────────────────────────────────────────────────────────────────────────
+
+      const failed: { batchStart: number; error: string; code?: string }[] = [];
       const BATCH = 500;
       let inserted = 0;
       let skipped = 0;
 
-      for (let i = 0; i < validRows.length; i += BATCH) {
-        const chunk = validRows.slice(i, i + BATCH);
+      for (let i = 0; i < dedupedRows.length; i += BATCH) {
+        const chunk = dedupedRows.slice(i, i + BATCH);
         try {
           const { data, error } = await supabase
             .from("movimientos")
@@ -126,14 +148,9 @@ export default function Cargue() {
               ignoreDuplicates,
             })
             .select("id");
+
           if (error) {
-            failed.push({
-              batchStart: i,
-              error: error.message,
-              code: error.code,
-              details: error.details ?? undefined,
-              hint: error.hint ?? undefined,
-            });
+            failed.push({ batchStart: i, error: error.message, code: error.code });
           } else {
             const insertedInChunk = Array.isArray(data) ? data.length : 0;
             inserted += insertedInChunk;
@@ -146,24 +163,18 @@ export default function Cargue() {
 
       setInsertedCount(inserted);
       setSkippedCount(skipped);
+      setDupCount(internalDups);
 
       if (failed.length > 0 && inserted === 0) {
-        const first = failed[0];
-        const detailParts = [
-          first.code ? `Código: ${first.code}` : null,
-          first.error ? `Mensaje: ${first.error}` : null,
-          first.details ? `Detalles: ${first.details}` : null,
-          first.hint ? `Sugerencia: ${first.hint}` : null,
-        ].filter(Boolean);
         setInsertError(
-          `No se pudo importar ningún registro.\n${detailParts.join("\n")}\n(${failed.length} lote(s) fallaron)`,
+          `No se pudo importar ningún registro.\nMensaje: ${failed[0].error}\n(${failed.length} lote(s) fallaron)`,
         );
         setStep("preview");
         return;
       }
 
       if (failed.length > 0) {
-        toast.warning(`${inserted} registros importados, ${failed.length} lote(s) fallaron: ${failed[0].error}`);
+        toast.warning(`${inserted} importados, ${failed.length} lote(s) fallaron: ${failed[0].error}`);
       }
 
       setStep("success");
@@ -178,6 +189,7 @@ export default function Cargue() {
     setRows([]);
     setInsertedCount(0);
     setSkippedCount(0);
+    setDupCount(0);
     setInsertError(null);
     setShowDuplicadosConfirm(false);
     setStep("upload");
@@ -291,7 +303,7 @@ export default function Cargue() {
 
           <ErrorViewer rows={rows} onRowsChange={setRows} />
 
-          {/* Confirmación de sobreescritura de duplicados */}
+          {/* Confirmación sobreescritura */}
           {showDuplicadosConfirm && (
             <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-4 space-y-3">
               <div className="flex items-start gap-3">
@@ -299,7 +311,8 @@ export default function Cargue() {
                 <div>
                   <p className="text-sm font-semibold text-amber-500">¿Estás seguro de sobreescribir los duplicados?</p>
                   <p className="text-xs text-muted-foreground mt-1">
-                    Los registros que ya existen en la base de datos serán actualizados con los valores del archivo.
+                    Los registros que ya existen en la base de datos serán actualizados con los valores del archivo. Las
+                    filas duplicadas dentro del mismo archivo se consolidan automáticamente (se conserva la última).
                     Esta acción no se puede deshacer.
                   </p>
                 </div>
@@ -358,19 +371,23 @@ export default function Cargue() {
         <div className="mt-6 flex flex-col items-center justify-center rounded-lg border border-success/30 bg-success/5 p-12 text-center">
           <CheckCircle2 className="h-16 w-16 text-success" />
           <h2 className="mt-4 text-2xl font-bold text-foreground">¡Importación exitosa!</h2>
-          <div className="mt-4 grid w-full max-w-md grid-cols-1 gap-2 sm:grid-cols-3">
-            <div className="rounded-md border border-success/30 bg-success/10 p3">
+          <div className="mt-4 grid w-full max-w-md grid-cols-1 gap-2 sm:grid-cols-4">
+            <div className="rounded-md border border-success/30 bg-success/10 p-3">
               <div className="text-[11px] font-semibold uppercase tracking-wider text-success">Importados</div>
               <div className="mt-1 text-xl font-bold text-success tabular-nums">
                 {insertedCount.toLocaleString("es-CO")}
               </div>
             </div>
             <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-500">
-                Duplicados omitidos
-              </div>
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-500">Omitidos BD</div>
               <div className="mt-1 text-xl font-bold text-amber-500 tabular-nums">
                 {skippedCount.toLocaleString("es-CO")}
+              </div>
+            </div>
+            <div className="rounded-md border border-blue-500/30 bg-blue-500/10 p-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-blue-400">Dups archivo</div>
+              <div className="mt-1 text-xl font-bold text-blue-400 tabular-nums">
+                {dupCount.toLocaleString("es-CO")}
               </div>
             </div>
             <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3">
