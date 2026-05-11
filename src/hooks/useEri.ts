@@ -25,7 +25,6 @@ export interface EriValueRow {
   valor_pyg: number;
 }
 
-// Fila resumida: sin tercero, usada para totales y gráficas
 export interface EriResumidaRow {
   orden: number;
   concepto: string;
@@ -40,7 +39,6 @@ export interface EriResumidaRow {
   valor_pyg: number;
 }
 
-// Fila con tercero: usada solo para el detalle expandible
 export interface EriCompactRow {
   orden: number;
   año_mes_num: number;
@@ -67,7 +65,6 @@ export function usePlanPyg() {
   });
 }
 
-// ── Tab Período: usa v_eri_resumida (322 filas max) ──
 export function useEri(filtros: FiltroDashboard) {
   return useQuery({
     queryKey: ["eri", filtros],
@@ -84,7 +81,6 @@ export function useEri(filtros: FiltroDashboard) {
   });
 }
 
-// ── Tab Mes a mes: usa v_eri_resumida para los totales por mes ──
 export function useEriAllMonths(filtros: { año: number | "Todas"; compania: string; ccKey: string }) {
   return useQuery({
     queryKey: ["eri-all-months", filtros],
@@ -105,7 +101,6 @@ export function useEriAllMonths(filtros: { año: number | "Todas"; compania: str
   });
 }
 
-// ── Tab Por CC: usa v_eri_resumida para los totales por CC ──
 export function useEriAllCC(filtros: { año: number | "Todas"; compania: string; mes: number | "Todos" }) {
   return useQuery({
     queryKey: ["eri-all-cc", filtros],
@@ -126,24 +121,21 @@ export function useEriAllCC(filtros: { año: number | "Todas"; compania: string;
   });
 }
 
-// ── Detalle de terceros: usa v_eri_por_mes SOLO para un orden específico ──
+// FIX: usar select("*") para evitar el error de parsing con "año_mes_num" en el string
 export function useEriDetalleTerceros(filtros: { año: number | "Todas"; compania: string; orden: number | null }) {
   return useQuery({
     queryKey: ["eri-detalle-terceros", filtros],
     enabled: filtros.orden !== null,
     queryFn: async (): Promise<EriCompactRow[]> => {
       if (!filtros.orden) return [];
-      let q = supabase
-        .from("v_eri_por_mes")
-        .select("orden, año_mes_num, cc_key, compania, valor_pyg, tercero_key, nombre_tercero, concepto")
-        .eq("orden", filtros.orden);
+      let q = supabase.from("v_eri_por_mes").select("*").eq("orden", filtros.orden);
       if (filtros.año !== "Todas") {
         q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
       }
       if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
       const { data, error } = await q.limit(2000);
       if (error) throw error;
-      return (data ?? []) as EriCompactRow[];
+      return (data ?? []) as unknown as EriCompactRow[];
     },
   });
 }
