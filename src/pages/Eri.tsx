@@ -7,14 +7,18 @@ import {
   useEriAllMonths,
   useEriAllCC,
   useGastosPorCC,
+  useEriTerceroCount,
+  useEriDetalle,
+  useEriAuditoria,
   type GastoTerceroRow,
   type PlanPygRow,
-  type EriResumidaRow,
+  type EriDetalleRow,
 } from "@/hooks/useEri";
 import { EmptyState, ErrorState, LoadingSkeleton } from "@/components/dashboard/StateMessages";
 import type { FiltroDashboard } from "@/types/financiero";
 
 const MES_LABELS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+const UMBRAL_TERCEROS = 20; // ≤ 20 → inline, > 20 → botón auditoría
 
 function mesLabel(yyyymm: number) {
   const y = Math.floor(yyyymm / 100);
@@ -37,36 +41,57 @@ const CC_KEYS = [
   { key: "03-DIGITAL", label: "Digital" },
   { key: "04-MONTERREY", label: "Monterrey" },
 ];
-
 const CENTROS = [{ key: "TODOS", label: "Consolidado" }, ...CC_KEYS];
 
-type TabId = "periodo" | "mes-a-mes" | "por-cc";
+type TabId = "periodo" | "mes-a-mes" | "por-cc" | "auditoria";
+
+// Contexto compartido para navegación a auditoría
+interface AuditoriaCtx {
+  orden: number;
+  concepto: string;
+  ccKey: string;
+  mes: number | "Todos";
+}
 
 export default function Eri() {
   const filtros = useFiltros();
   const plan = usePlanPyg();
   const [activeTab, setActiveTab] = useState<TabId>("periodo");
+  const [audCtx, setAudCtx] = useState<AuditoriaCtx | null>(null);
+
+  const goToAuditoria = (ctx: AuditoriaCtx) => {
+    setAudCtx(ctx);
+    setActiveTab("auditoria");
+  };
+
+  const tabs: { id: TabId; label: string }[] = [
+    { id: "periodo", label: "Período" },
+    { id: "mes-a-mes", label: "Mes a mes" },
+    { id: "por-cc", label: "Por centro de costo" },
+    { id: "auditoria", label: "Auditoría" },
+  ];
 
   return (
     <AppLayout title="Estado de Resultados">
       <div className="mb-4 flex gap-1 border-b border-border">
-        {(["periodo", "mes-a-mes", "por-cc"] as TabId[]).map((id) => (
+        {tabs.map((t) => (
           <button
-            key={id}
-            onClick={() => setActiveTab(id)}
+            key={t.id}
+            onClick={() => setActiveTab(t.id)}
             className={`border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
-              activeTab === id
+              activeTab === t.id
                 ? "border-primary text-primary"
                 : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
           >
-            {id === "periodo" ? "Período" : id === "mes-a-mes" ? "Mes a mes" : "Por centro de costo"}
+            {t.label}
           </button>
         ))}
       </div>
-      {activeTab === "periodo" && <TabPeriodo plan={plan} filtros={filtros} />}
-      {activeTab === "mes-a-mes" && <TabMesAMes plan={plan} filtros={filtros} />}
-      {activeTab === "por-cc" && <TabPorCC plan={plan} filtros={filtros} />}
+      {activeTab === "periodo" && <TabPeriodo plan={plan} filtros={filtros} onAuditoria={goToAuditoria} />}
+      {activeTab === "mes-a-mes" && <TabMesAMes plan={plan} filtros={filtros} onAuditoria={goToAuditoria} />}
+      {activeTab === "por-cc" && <TabPorCC plan={plan} filtros={filtros} onAuditoria={goToAuditoria} />}
+      {activeTab === "auditoria" && <TabAuditoria plan={plan} filtros={filtros} ctx={audCtx} />}
     </AppLayout>
   );
 }
@@ -75,6 +100,7 @@ type PlanQuery = ReturnType<typeof usePlanPyg>;
 interface TabProps {
   plan: PlanQuery;
   filtros: FiltroDashboard;
+  onAuditoria: (ctx: AuditoriaCtx) => void;
 }
 
 function CcPills({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -96,11 +122,150 @@ function CcPills({ value, onChange }: { value: string; onChange: (v: string) => 
 }
 
 // ─────────────────────────────────────────────
+// COMPONENTE REUTILIZABLE: Filas de detalle inline
+// Muestra tercero | NIT | CC | meses... | total
+// ─────────────────────────────────────────────
+function DetalleInline({
+  orden,
+  filtros,
+  months,
+  showMonths,
+  mes,
+}: {
+  orden: number;
+  filtros: FiltroDashboard;
+  months?: number[];
+  showMonths: boolean;
+  mes: number | "Todos";
+}) {
+  const detalle = useEriDetalle({
+    año: filtros.año,
+    compania: filtros.compania,
+    mes,
+    orden,
+    enabled: true,
+  });
+
+  if (detalle.isLoading) {
+    return (
+      <tr>
+        <td colSpan={20} className="px-6 py-2 text-[10px] text-muted-foreground animate-pulse">
+          Cargando detalle...
+        </td>
+      </tr>
+    );
+  }
+
+  const rows = detalle.data ?? [];
+
+  // Agrupar por tercero+cc, calcular por mes
+  const grouped = new Map<
+    string,
+    { nombre: string; nit: string; cc: string; porMes: Map<number, number>; total: number }
+  >();
+  for (const r of rows) {
+    const key = `${r.tercero_key}||${r.cc_key}`;
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        nombre: r.nombre_tercero || r.tercero_key || "Sin identificar",
+        nit: r.tercero_key || "-",
+        cc: r.cc_key,
+        porMes: new Map(),
+        total: 0,
+      });
+    }
+    const g = grouped.get(key)!;
+    const mes = Number(r.año_mes_num);
+    g.porMes.set(mes, (g.porMes.get(mes) ?? 0) + (Number(r.valor_pyg) || 0));
+    g.total += Number(r.valor_pyg) || 0;
+  }
+
+  // Ordenar mayor a menor por valor absoluto
+  const sorted = Array.from(grouped.values()).sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+
+  if (sorted.length === 0) {
+    return (
+      <tr>
+        <td colSpan={20} className="px-6 py-1.5 text-[10px] text-muted-foreground/50">
+          Sin detalle disponible
+        </td>
+      </tr>
+    );
+  }
+
+  const ccLabel = (k: string) => CC_KEYS.find((c) => c.key === k)?.label ?? k;
+
+  return (
+    <>
+      {/* Sub-encabezado */}
+      <tr style={{ background: "#050a14" }}>
+        <td className="px-6 py-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+          Tercero
+        </td>
+        <td className="px-3 py-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/50">NIT</td>
+        <td className="px-3 py-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/50">CC</td>
+        {showMonths &&
+          months &&
+          months.map((m) => (
+            <td
+              key={m}
+              className="px-3 py-1 text-right text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/50"
+            >
+              {mesLabel(m)}
+            </td>
+          ))}
+        <td className="px-3 py-1 text-right text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/50">
+          Total
+        </td>
+      </tr>
+      {sorted.map((g, i) => {
+        const ft = fmtCell(g.total);
+        return (
+          <tr key={i} style={{ background: i % 2 === 0 ? "#060b15" : "#080c18" }}>
+            <td className="px-6 py-1 text-[10px] text-muted-foreground/70 max-w-[200px] truncate">{g.nombre}</td>
+            <td className="px-3 py-1 font-mono text-[9px] text-muted-foreground/50">{g.nit}</td>
+            <td className="px-3 py-1 text-[9px] text-muted-foreground/50">{ccLabel(g.cc)}</td>
+            {showMonths &&
+              months &&
+              months.map((m) => {
+                const v = g.porMes.get(m) ?? 0;
+                const f = fmtCell(v);
+                return (
+                  <td
+                    key={m}
+                    className={`px-3 py-1 text-right text-[10px] tabular-nums ${f.neg ? "text-destructive/70" : f.zero ? "text-muted-foreground/20" : "text-muted-foreground/60"}`}
+                  >
+                    {f.text}
+                  </td>
+                );
+              })}
+            <td
+              className={`px-3 py-1 text-right font-semibold text-[10px] tabular-nums ${ft.neg ? "text-destructive" : ft.zero ? "text-muted-foreground/30" : "text-foreground/80"}`}
+            >
+              {ft.text}
+            </td>
+          </tr>
+        );
+      })}
+    </>
+  );
+}
+
+// ─────────────────────────────────────────────
 // TAB PERÍODO
 // ─────────────────────────────────────────────
-function TabPeriodo({ plan, filtros }: TabProps) {
+function TabPeriodo({ plan, filtros, onAuditoria }: TabProps) {
   const [ccActivo, setCcActivo] = useState("TODOS");
+  const [openRows, setOpenRows] = useState<Set<number>>(new Set());
   const eri = useEri({ ...filtros, ccKey: ccActivo === "TODOS" ? "Todas" : ccActivo });
+
+  const mesActivo = filtros.mes as number | "Todos";
+
+  const terceroCount = useEriTerceroCount({
+    año: filtros.año,
+    compania: filtros.compania,
+    mes: mesActivo,
+  });
 
   const { planRows, valueMap, ingresosTotales } = useMemo(() => {
     const planRows: PlanPygRow[] = plan.data ?? [];
@@ -122,12 +287,15 @@ function TabPeriodo({ plan, filtros }: TabProps) {
         ? `Acumulado ${filtros.año}`
         : mesLabel((filtros.año as number) * 100 + (filtros.mes as number));
 
-  const rowBg = (nivel: string) => {
-    if (nivel === "Titulo") return "#1e2d42";
-    if (nivel === "Total") return undefined;
-    if (nivel === "Subtotal") return "#0d2040";
-    return undefined;
-  };
+  const toggleRow = (orden: number) =>
+    setOpenRows((p) => {
+      const s = new Set(p);
+      s.has(orden) ? s.delete(orden) : s.add(orden);
+      return s;
+    });
+
+  const esCuentaDetalle = (row: PlanPygRow) =>
+    row.nivel === "Cuenta" && ["4", "5", "6"].includes(String((row as any).clase_cod));
 
   return (
     <div>
@@ -169,36 +337,73 @@ function TabPeriodo({ plan, filtros }: TabProps) {
                 const isTitulo = row.nivel === "Titulo";
                 const isTotal = row.nivel === "Total";
                 const isSubtotal = row.nivel === "Subtotal";
-                const bg = rowBg(row.nivel);
                 const bold = isTitulo || isTotal || isSubtotal;
-                const dynamicBg = isTotal ? (val >= 0 ? "#1a2d1a" : "#2d1a1a") : bg;
+                const bg = isTitulo
+                  ? "#1e2d42"
+                  : isTotal
+                    ? val >= 0
+                      ? "#1a2d1a"
+                      : "#2d1a1a"
+                    : isSubtotal
+                      ? "#0d2040"
+                      : undefined;
+                const esDetalle = esCuentaDetalle(row);
+                const count = terceroCount.data?.[row.orden] ?? 0;
+                const isOpen = openRows.has(row.orden);
+
                 return (
-                  <tr
-                    key={row.orden}
-                    className="border-b border-border/40"
-                    style={{ background: dynamicBg, fontWeight: bold ? 700 : 400 }}
-                  >
-                    <td className="px-3 py-1.5 text-foreground">{row.etiqueta_fila || row.concepto}</td>
-                    {isTitulo ? (
-                      <>
-                        <td />
-                        <td />
-                      </>
-                    ) : (
-                      <>
-                        <td
-                          className={`whitespace-nowrap px-3 py-1.5 text-right tabular-nums ${
-                            f.neg ? "text-destructive" : f.zero ? "text-muted-foreground" : "text-foreground"
-                          }`}
-                        >
-                          {f.text}
-                        </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-                          {pct != null ? `${pct.toFixed(2)}%` : ""}
-                        </td>
-                      </>
+                  <Fragment key={row.orden}>
+                    <tr className="border-b border-border/40" style={{ background: bg, fontWeight: bold ? 700 : 400 }}>
+                      <td className="px-3 py-1.5 text-foreground">
+                        <div className="flex items-center gap-2">
+                          {esDetalle && count > 0 && count <= UMBRAL_TERCEROS && (
+                            <button
+                              onClick={() => toggleRow(row.orden)}
+                              className="text-[9px] text-muted-foreground/60 hover:text-primary transition-colors"
+                            >
+                              {isOpen ? "▾" : "▸"}
+                            </button>
+                          )}
+                          <span>{row.etiqueta_fila || row.concepto}</span>
+                          {esDetalle && count > UMBRAL_TERCEROS && (
+                            <button
+                              onClick={() =>
+                                onAuditoria({
+                                  orden: row.orden,
+                                  concepto: row.etiqueta_fila || row.concepto,
+                                  ccKey: ccActivo === "TODOS" ? "Todas" : ccActivo,
+                                  mes: mesActivo,
+                                })
+                              }
+                              className="ml-auto text-[9px] text-primary/70 hover:text-primary border border-primary/30 rounded px-1.5 py-0.5 transition-colors"
+                            >
+                              Ver detalle →
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                      {isTitulo ? (
+                        <>
+                          <td />
+                          <td />
+                        </>
+                      ) : (
+                        <>
+                          <td
+                            className={`whitespace-nowrap px-3 py-1.5 text-right tabular-nums ${f.neg ? "text-destructive" : f.zero ? "text-muted-foreground" : "text-foreground"}`}
+                          >
+                            {f.text}
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                            {pct != null ? `${pct.toFixed(2)}%` : ""}
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                    {isOpen && esDetalle && count <= UMBRAL_TERCEROS && (
+                      <DetalleInline orden={row.orden} filtros={filtros} showMonths={false} mes={mesActivo} />
                     )}
-                  </tr>
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -212,11 +417,18 @@ function TabPeriodo({ plan, filtros }: TabProps) {
 // ─────────────────────────────────────────────
 // TAB MES A MES
 // ─────────────────────────────────────────────
-function TabMesAMes({ plan, filtros }: TabProps) {
+function TabMesAMes({ plan, filtros, onAuditoria }: TabProps) {
   const [ccActivo, setCcActivo] = useState("TODOS");
+  const [openRows, setOpenRows] = useState<Set<number>>(new Set());
 
   const eriAll = useEriAllMonths({ año: filtros.año, compania: filtros.compania, ccKey: ccActivo });
   const gastosAll = useGastosPorCC({ año: filtros.año, mes: "Todos", compania: filtros.compania });
+
+  const terceroCount = useEriTerceroCount({
+    año: filtros.año,
+    compania: filtros.compania,
+    mes: "Todos",
+  });
 
   const planRows: PlanPygRow[] = plan.data ?? [];
 
@@ -258,24 +470,22 @@ function TabMesAMes({ plan, filtros }: TabProps) {
   const getTotal = (orden: number) => getMonthVals(orden).reduce((s, v) => s + v, 0);
 
   const sub = useMemo(() => {
-    const iCuentas = planRows.filter(
+    const iC = planRows.filter(
       (r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "4" && String((r as any).grupo_cod) === "41",
     );
-    const cCuentas = planRows.filter((r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "6");
-    const oiCuentas = planRows.filter(
+    const cC = planRows.filter((r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "6");
+    const oiC = planRows.filter(
       (r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "4" && String((r as any).grupo_cod) === "42",
     );
-
-    const ingMes = months.map((m) => iCuentas.reduce((s, r) => s + (valueMap.get(r.orden)?.get(m) ?? 0), 0));
-    const costMes = months.map((m) => cCuentas.reduce((s, r) => s + (valueMap.get(r.orden)?.get(m) ?? 0), 0));
+    const ingMes = months.map((m) => iC.reduce((s, r) => s + (valueMap.get(r.orden)?.get(m) ?? 0), 0));
+    const costMes = months.map((m) => cC.reduce((s, r) => s + (valueMap.get(r.orden)?.get(m) ?? 0), 0));
     const ubMes = months.map((_, i) => ingMes[i] + costMes[i]);
     const gopMes = months.map((m) => gastosOperPorMes.get(m) ?? 0);
     const uoMes = months.map((_, i) => ubMes[i] - gopMes[i]);
-    const oiMes = months.map((m) => oiCuentas.reduce((s, r) => s + (valueMap.get(r.orden)?.get(m) ?? 0), 0));
+    const oiMes = months.map((m) => oiC.reduce((s, r) => s + (valueMap.get(r.orden)?.get(m) ?? 0), 0));
     const gnopMes = months.map((m) => gastosNoOperPorMes.get(m) ?? 0);
     const uaiMes = months.map((_, i) => uoMes[i] + oiMes[i] - gnopMes[i]);
-    const sum = (arr: number[]) => arr.reduce((s, v) => s + v, 0);
-
+    const sum = (a: number[]) => a.reduce((s, v) => s + v, 0);
     return {
       ingMes,
       ing: sum(ingMes),
@@ -300,13 +510,21 @@ function TabMesAMes({ plan, filtros }: TabProps) {
   const isLoading = plan.isLoading || eriAll.isLoading || gastosAll.isLoading;
   const isError = plan.isError || eriAll.isError || gastosAll.isError;
 
+  const toggleRow = (orden: number) =>
+    setOpenRows((p) => {
+      const s = new Set(p);
+      s.has(orden) ? s.delete(orden) : s.add(orden);
+      return s;
+    });
+
+  const esCuentaDetalle = (row: PlanPygRow) =>
+    row.nivel === "Cuenta" && ["4", "5", "6"].includes(String((row as any).clase_cod));
+
   const MC = ({ v, bold = false }: { v: number; bold?: boolean }) => {
     const f = fmtCell(v);
     return (
       <td
-        className={`whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-[11px] ${bold ? "font-bold" : ""} ${
-          f.neg ? "text-destructive" : f.zero ? "text-muted-foreground/30" : "text-foreground"
-        }`}
+        className={`whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-[11px] ${bold ? "font-bold" : ""} ${f.neg ? "text-destructive" : f.zero ? "text-muted-foreground/30" : "text-foreground"}`}
       >
         {f.text}
       </td>
@@ -319,23 +537,56 @@ function TabMesAMes({ plan, filtros }: TabProps) {
     if (mVals.every((v) => v === 0) && tot === 0) return null;
     const f = fmtCell(tot);
     const pct = ingTot ? (tot / ingTot) * 100 : null;
+    const esDetalle = esCuentaDetalle(row);
+    const count = terceroCount.data?.[row.orden] ?? 0;
+    const isOpen = openRows.has(row.orden);
     return (
-      <tr className="border-b border-border/40 bg-background/20">
-        <td className="px-3 py-1.5 pl-6 text-foreground text-[11px]">{row.etiqueta_fila || row.concepto}</td>
-        {mVals.map((v, i) => (
-          <MC key={i} v={v} />
-        ))}
-        <td
-          className={`whitespace-nowrap px-3 py-1.5 text-right font-semibold tabular-nums text-[11px] ${
-            f.neg ? "text-destructive" : f.zero ? "text-muted-foreground" : "text-foreground"
-          }`}
-        >
-          {f.text}
-        </td>
-        <td className="whitespace-nowrap px-3 py-1.5 text-right text-[10px] tabular-nums text-muted-foreground">
-          {pct != null && tot !== 0 ? `${pct.toFixed(2)}%` : "-"}
-        </td>
-      </tr>
+      <Fragment key={row.orden}>
+        <tr className="border-b border-border/40 bg-background/20">
+          <td className="px-3 py-1.5 pl-6 text-foreground text-[11px]">
+            <div className="flex items-center gap-2">
+              {esDetalle && count > 0 && count <= UMBRAL_TERCEROS && (
+                <button
+                  onClick={() => toggleRow(row.orden)}
+                  className="text-[9px] text-muted-foreground/60 hover:text-primary"
+                >
+                  {isOpen ? "▾" : "▸"}
+                </button>
+              )}
+              <span>{row.etiqueta_fila || row.concepto}</span>
+              {esDetalle && count > UMBRAL_TERCEROS && (
+                <button
+                  onClick={() =>
+                    onAuditoria({
+                      orden: row.orden,
+                      concepto: row.etiqueta_fila || row.concepto,
+                      ccKey: ccActivo === "TODOS" ? "Todas" : ccActivo,
+                      mes: "Todos",
+                    })
+                  }
+                  className="ml-auto text-[9px] text-primary/70 hover:text-primary border border-primary/30 rounded px-1.5 py-0.5"
+                >
+                  Ver detalle →
+                </button>
+              )}
+            </div>
+          </td>
+          {mVals.map((v, i) => (
+            <MC key={i} v={v} />
+          ))}
+          <td
+            className={`whitespace-nowrap px-3 py-1.5 text-right font-semibold tabular-nums text-[11px] ${f.neg ? "text-destructive" : f.zero ? "text-muted-foreground" : "text-foreground"}`}
+          >
+            {f.text}
+          </td>
+          <td className="whitespace-nowrap px-3 py-1.5 text-right text-[10px] tabular-nums text-muted-foreground">
+            {pct != null && tot !== 0 ? `${pct.toFixed(2)}%` : "-"}
+          </td>
+        </tr>
+        {isOpen && esDetalle && count <= UMBRAL_TERCEROS && (
+          <DetalleInline orden={row.orden} filtros={filtros} months={months} showMonths={true} mes="Todos" />
+        )}
+      </Fragment>
     );
   };
 
@@ -349,9 +600,7 @@ function TabMesAMes({ plan, filtros }: TabProps) {
           <MC key={i} v={v} bold />
         ))}
         <td
-          className={`whitespace-nowrap px-3 py-1.5 text-right font-bold tabular-nums text-[11px] ${
-            tot < 0 ? "text-destructive" : tot === 0 ? "text-muted-foreground" : "text-foreground"
-          }`}
+          className={`whitespace-nowrap px-3 py-1.5 text-right font-bold tabular-nums text-[11px] ${tot < 0 ? "text-destructive" : tot === 0 ? "text-muted-foreground" : "text-foreground"}`}
         >
           {f.text}
         </td>
@@ -372,9 +621,7 @@ function TabMesAMes({ plan, filtros }: TabProps) {
           <MC key={i} v={v} bold />
         ))}
         <td
-          className={`whitespace-nowrap px-3 py-1.5 text-right font-bold tabular-nums text-[11px] ${
-            tot < 0 ? "text-destructive" : tot === 0 ? "text-muted-foreground" : "text-primary"
-          }`}
+          className={`whitespace-nowrap px-3 py-1.5 text-right font-bold tabular-nums text-[11px] ${tot < 0 ? "text-destructive" : tot === 0 ? "text-muted-foreground" : "text-primary"}`}
         >
           {f.text}
         </td>
@@ -396,18 +643,18 @@ function TabMesAMes({ plan, filtros }: TabProps) {
     </tr>
   );
 
-  const ingCuentas = planRows.filter(
+  const ingC = planRows.filter(
     (r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "4" && String((r as any).grupo_cod) === "41",
   );
-  const costCuentas = planRows.filter((r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "6");
-  const gastCuentas = planRows.filter((r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "5");
-  const oiCuentas = planRows.filter(
+  const costC = planRows.filter((r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "6");
+  const gastC = planRows.filter((r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "5");
+  const oiC = planRows.filter(
     (r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "4" && String((r as any).grupo_cod) === "42",
   );
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+      <div className="mb-4">
         <CcPills value={ccActivo} onChange={setCcActivo} />
       </div>
       {isLoading ? (
@@ -446,24 +693,24 @@ function TabMesAMes({ plan, filtros }: TabProps) {
             </thead>
             <tbody>
               <SH label="INGRESOS OPERACIONALES" />
-              {ingCuentas.map((r) => (
+              {ingC.map((r) => (
                 <CuentaRow key={r.orden} row={r} />
               ))}
               <TotalRow label="TOTAL INGRESOS OPERACIONALES" mv={sub.ingMes} tot={sub.ing} />
               <SH label="COSTOS DE VENTAS" />
-              {costCuentas.map((r) => (
+              {costC.map((r) => (
                 <CuentaRow key={r.orden} row={r} />
               ))}
               <TotalRow label="TOTAL COSTOS" mv={sub.costMes} tot={sub.cost} />
               <SubRow label="UTILIDAD BRUTA" mv={sub.ubMes} tot={sub.ub} />
               <SH label="GASTOS OPERACIONALES" />
-              {gastCuentas.map((r) => (
+              {gastC.map((r) => (
                 <CuentaRow key={r.orden} row={r} />
               ))}
               <TotalRow label="TOTAL GASTOS OPERACIONALES" mv={sub.gopMes} tot={sub.gop} />
               <SubRow label="UTILIDAD OPERACIONAL" mv={sub.uoMes} tot={sub.uo} />
               <SH label="OTROS INGRESOS" />
-              {oiCuentas.map((r) => (
+              {oiC.map((r) => (
                 <CuentaRow key={r.orden} row={r} />
               ))}
               <TotalRow label="TOTAL OTROS INGRESOS" mv={sub.oiMes} tot={sub.oi} />
@@ -479,7 +726,7 @@ function TabMesAMes({ plan, filtros }: TabProps) {
 }
 
 // ─────────────────────────────────────────────
-// TAB POR CENTRO DE COSTO
+// TAB POR CC (igual que antes + drill-down)
 // ─────────────────────────────────────────────
 interface VCC {
   [cc: string]: number;
@@ -515,11 +762,7 @@ function buildTree(rows: GastoTerceroRow[]): N1[] {
   const n1Map = new Map<string, N1>();
   for (const [key, ccMap] of map.entries()) {
     const parts = key.split("||");
-    const tipo = parts[0];
-    const det = parts[1];
-    const nom = parts[2];
-    const terc = parts[3];
-    const nit = parts[4];
+    const [tipo, det, nom, terc, nit] = parts;
     const vals: VCC = {};
     for (const [cc, v] of ccMap.entries()) vals[cc] = v;
     if (!n1Map.has(tipo)) n1Map.set(tipo, { tipo_gasto: tipo, valores: {}, detalles: [] });
@@ -549,19 +792,23 @@ function buildTree(rows: GastoTerceroRow[]): N1[] {
           ...n2,
           cuentas: n2.cuentas
             .sort((a, b) => a.nombre_cuenta.localeCompare(b.nombre_cuenta))
-            .map((n3) => ({
-              ...n3,
-              terceros: n3.terceros.sort((a, b) => sumAll(b.valores) - sumAll(a.valores)),
-            })),
+            .map((n3) => ({ ...n3, terceros: n3.terceros.sort((a, b) => sumAll(b.valores) - sumAll(a.valores)) })),
         })),
     }));
 }
 
-function TabPorCC({ plan, filtros }: TabProps) {
+function TabPorCC({ plan, filtros, onAuditoria }: TabProps) {
   const [mesLocal, setMesLocal] = useState<number | "Todos">("Todos");
+  const [openRows, setOpenRows] = useState<Set<number>>(new Set());
   const gastos = useGastosPorCC({ año: filtros.año, mes: mesLocal, compania: filtros.compania });
   const eriCC = useEriAllCC({ año: filtros.año, compania: filtros.compania, mes: mesLocal });
   const tree = useMemo(() => buildTree(gastos.data ?? []), [gastos.data]);
+
+  const terceroCount = useEriTerceroCount({
+    año: filtros.año,
+    compania: filtros.compania,
+    mes: mesLocal,
+  });
 
   const eriMap = useMemo(() => {
     const m = new Map<number, Map<string, number>>();
@@ -592,7 +839,6 @@ function TabPorCC({ plan, filtros }: TabProps) {
       s.has(k) ? s.delete(k) : s.add(k);
       return s;
     });
-
   const togN1 = (k: string) =>
     setOpenN1((p) => {
       const s = new Set(p);
@@ -611,53 +857,51 @@ function TabPorCC({ plan, filtros }: TabProps) {
       s.has(k) ? s.delete(k) : s.add(k);
       return s;
     });
+  const toggleRow = (orden: number) =>
+    setOpenRows((p) => {
+      const s = new Set(p);
+      s.has(orden) ? s.delete(orden) : s.add(orden);
+      return s;
+    });
 
   const planRows: PlanPygRow[] = plan.data ?? [];
-  const ingCuentas = planRows.filter(
+  const ingC = planRows.filter(
     (r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "4" && String((r as any).grupo_cod) === "41",
   );
-  const costCuentas = planRows.filter((r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "6");
-  const oiCuentas = planRows.filter(
+  const costC = planRows.filter((r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "6");
+  const oiC = planRows.filter(
     (r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "4" && String((r as any).grupo_cod) === "42",
   );
 
   const vIng: VCC = {};
-  for (const row of ingCuentas) {
+  for (const row of ingC) {
     const v = getVals(row.orden);
     for (const [cc, val] of Object.entries(v)) vIng[cc] = (vIng[cc] ?? 0) + val;
   }
   const vCost: VCC = {};
-  for (const row of costCuentas) {
+  for (const row of costC) {
     const v = getVals(row.orden);
     for (const [cc, val] of Object.entries(v)) vCost[cc] = (vCost[cc] ?? 0) + val;
   }
   const vUB: VCC = {};
   for (const cc of CC_KEYS) vUB[cc.key] = (vIng[cc.key] ?? 0) + (vCost[cc.key] ?? 0);
-
   const gopVals = tree.find((n) => n.tipo_gasto === "01.GASTOS OPERACIONALES")?.valores ?? {};
   const vUO: VCC = {};
   for (const cc of CC_KEYS) vUO[cc.key] = (vUB[cc.key] ?? 0) - (gopVals[cc.key] ?? 0);
-
   const vOI: VCC = {};
-  for (const row of oiCuentas) {
+  for (const row of oiC) {
     const v = getVals(row.orden);
     for (const [cc, val] of Object.entries(v)) vOI[cc] = (vOI[cc] ?? 0) + val;
   }
-
   const gnopVals = tree.find((n) => n.tipo_gasto === "02.GASTO NO OPERACIONAL")?.valores ?? {};
   const vUAI: VCC = {};
   const allCCKeys = new Set([...CC_KEYS.map((c) => c.key), ...Object.keys(vOI), ...Object.keys(gnopVals)]);
-  for (const cc of allCCKeys) {
-    vUAI[cc] = (vUO[cc] ?? 0) + (vOI[cc] ?? 0) - (gnopVals[cc] ?? 0);
-  }
+  for (const cc of allCCKeys) vUAI[cc] = (vUO[cc] ?? 0) + (vOI[cc] ?? 0) - (gnopVals[cc] ?? 0);
 
   const año = filtros.año === "Todas" ? 2026 : Number(filtros.año);
   const meses = [
     { value: "Todos" as const, label: "Acumulado" },
-    ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((m) => ({
-      value: año * 100 + m,
-      label: mesLabel(año * 100 + m),
-    })),
+    ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((m) => ({ value: año * 100 + m, label: mesLabel(año * 100 + m) })),
   ];
 
   const col = "px-2 py-1.5 text-right text-[11px] tabular-nums whitespace-nowrap min-w-[110px]";
@@ -668,29 +912,23 @@ function TabPorCC({ plan, filtros }: TabProps) {
     return (
       <td
         key={cc.key}
-        className={`${col} ${bold ? "font-bold" : ""} ${
-          f.neg ? "text-destructive" : f.zero ? "text-muted-foreground/30" : "text-foreground"
-        }`}
+        className={`${col} ${bold ? "font-bold" : ""} ${f.neg ? "text-destructive" : f.zero ? "text-muted-foreground/30" : "text-foreground"}`}
       >
         {f.text}
       </td>
     );
   };
-
   const CC_ = (vals: VCC, bold = false) => {
     const v = sumAll(vals);
     const f = fmtCell(v);
     return (
       <td
-        className={`${col} ${bold ? "font-bold" : ""} ${
-          f.neg ? "text-destructive" : f.zero ? "text-muted-foreground/30" : "text-primary"
-        }`}
+        className={`${col} ${bold ? "font-bold" : ""} ${f.neg ? "text-destructive" : f.zero ? "text-muted-foreground/30" : "text-primary"}`}
       >
         {f.text}
       </td>
     );
   };
-
   const PCT = (vals: VCC, cc: { key: string }, bold = false) => {
     const ci = vIng[cc.key] ?? 0;
     const v = vals[cc.key] ?? 0;
@@ -702,15 +940,12 @@ function TabPorCC({ plan, filtros }: TabProps) {
       );
     return (
       <td
-        className={`px-2 py-1.5 text-right text-[10px] tabular-nums whitespace-nowrap min-w-[55px] ${
-          bold ? "font-bold" : ""
-        } text-muted-foreground/70`}
+        className={`px-2 py-1.5 text-right text-[10px] tabular-nums whitespace-nowrap min-w-[55px] ${bold ? "font-bold" : ""} text-muted-foreground/70`}
       >
         {((v / ci) * 100).toFixed(2)}%
       </td>
     );
   };
-
   const PCTC = (vals: VCC, bold = false) => {
     const v = sumAll(vals);
     if (!v)
@@ -721,9 +956,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
       );
     return (
       <td
-        className={`px-2 py-1.5 text-right text-[10px] tabular-nums whitespace-nowrap min-w-[60px] ${
-          bold ? "font-bold" : ""
-        } text-muted-foreground/70`}
+        className={`px-2 py-1.5 text-right text-[10px] tabular-nums whitespace-nowrap min-w-[60px] ${bold ? "font-bold" : ""} text-muted-foreground/70`}
       >
         {((v / ingTotal) * 100).toFixed(2)}%
       </td>
@@ -741,7 +974,6 @@ function TabPorCC({ plan, filtros }: TabProps) {
       </td>
     </tr>
   );
-
   const TR = ({ label, vals }: { label: string; vals: VCC }) => (
     <tr className="border-b border-border" style={{ background: sumAll(vals) >= 0 ? "#1a2d1a" : "#2d1a1a" }}>
       <td className="px-3 py-1.5 text-[11px] font-bold text-foreground">{label}</td>
@@ -755,7 +987,6 @@ function TabPorCC({ plan, filtros }: TabProps) {
       {PCTC(vals, true)}
     </tr>
   );
-
   const SR = ({ label, vals }: { label: string; vals: VCC }) => (
     <tr className="border-b border-border border-l-2 border-l-primary" style={{ background: "#0d2040" }}>
       <td className="px-3 py-2 text-[12px] font-bold text-foreground">{label}</td>
@@ -774,18 +1005,61 @@ function TabPorCC({ plan, filtros }: TabProps) {
     const vals = getVals(row.orden);
     const cons = sumAll(vals);
     if (CC_KEYS.every((cc) => (vals[cc.key] ?? 0) === 0) && cons === 0) return null;
+    const count = terceroCount.data?.[row.orden] ?? 0;
+    const isOpen = openRows.has(row.orden);
+    const esDetalle = ["4", "5", "6"].includes(String((row as any).clase_cod));
     return (
-      <tr className={`border-b border-border/20 ${idx % 2 === 0 ? "bg-background/10" : ""}`}>
-        <td className="px-3 py-1 pl-8 text-[11px] text-muted-foreground">{row.etiqueta_fila || row.concepto}</td>
-        {CC_KEYS.map((cc) => (
-          <Fragment key={cc.key}>
-            {CV(vals, cc)}
-            {PCT(vals, cc)}
-          </Fragment>
-        ))}
-        {CC_(vals)}
-        {PCTC(vals)}
-      </tr>
+      <Fragment key={row.orden}>
+        <tr className={`border-b border-border/20 ${idx % 2 === 0 ? "bg-background/10" : ""}`}>
+          <td className="px-3 py-1 pl-8 text-[11px] text-muted-foreground">
+            <div className="flex items-center gap-2">
+              {esDetalle && count > 0 && count <= UMBRAL_TERCEROS && (
+                <button
+                  onClick={() => toggleRow(row.orden)}
+                  className="text-[9px] text-muted-foreground/60 hover:text-primary"
+                >
+                  {isOpen ? "▾" : "▸"}
+                </button>
+              )}
+              <span>{row.etiqueta_fila || row.concepto}</span>
+              {esDetalle && count > UMBRAL_TERCEROS && (
+                <button
+                  onClick={() =>
+                    onAuditoria({
+                      orden: row.orden,
+                      concepto: row.etiqueta_fila || row.concepto,
+                      ccKey: "Todas",
+                      mes: mesLocal,
+                    })
+                  }
+                  className="ml-auto text-[9px] text-primary/70 hover:text-primary border border-primary/30 rounded px-1.5 py-0.5"
+                >
+                  Ver detalle →
+                </button>
+              )}
+            </div>
+          </td>
+          {CC_KEYS.map((cc) => (
+            <Fragment key={cc.key}>
+              {CV(vals, cc)}
+              {PCT(vals, cc)}
+            </Fragment>
+          ))}
+          {CC_(vals)}
+          {PCTC(vals)}
+        </tr>
+        {isOpen && esDetalle && count <= UMBRAL_TERCEROS && (
+          <tr>
+            <td colSpan={CC_KEYS.length * 2 + 3} className="p-0">
+              <table className="w-full border-collapse">
+                <tbody>
+                  <DetalleInline orden={row.orden} filtros={filtros} showMonths={false} mes={mesLocal} />
+                </tbody>
+              </table>
+            </td>
+          </tr>
+        )}
+      </Fragment>
     );
   };
 
@@ -891,13 +1165,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
                                   return (
                                     <Fragment key={cc.key}>
                                       <td
-                                        className={`${col} text-[10px] ${
-                                          f.neg
-                                            ? "text-destructive"
-                                            : f.zero
-                                              ? "text-muted-foreground/20"
-                                              : "text-muted-foreground/50"
-                                        }`}
+                                        className={`${col} text-[10px] ${f.neg ? "text-destructive" : f.zero ? "text-muted-foreground/20" : "text-muted-foreground/50"}`}
                                       >
                                         {f.text}
                                       </td>
@@ -906,9 +1174,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
                                   );
                                 })}
                                 <td
-                                  className={`${col} text-[10px] ${
-                                    ft.neg ? "text-destructive" : "text-muted-foreground/50"
-                                  }`}
+                                  className={`${col} text-[10px] ${ft.neg ? "text-destructive" : "text-muted-foreground/50"}`}
                                 >
                                   {ft.text}
                                 </td>
@@ -930,7 +1196,6 @@ function TabPorCC({ plan, filtros }: TabProps) {
   const gnopTree = tree.find((n) => n.tipo_gasto === "02.GASTO NO OPERACIONAL");
   const isLoading = plan.isLoading || gastos.isLoading || eriCC.isLoading;
 
-  // Funciones nombradas para expandir/contraer (evita problemas de parsing JSX con llaves anidadas)
   const handleExpandAll = () => {
     setOpenN1(new Set(tree.map((n) => n.tipo_gasto)));
     setOpenN2(new Set(tree.flatMap((n) => n.detalles.map((d) => `${n.tipo_gasto}||${d.detalle_gasto}`))));
@@ -942,7 +1207,6 @@ function TabPorCC({ plan, filtros }: TabProps) {
       ),
     );
   };
-
   const handleCollapseAll = () => {
     setOpenN1(new Set());
     setOpenN2(new Set());
@@ -958,11 +1222,7 @@ function TabPorCC({ plan, filtros }: TabProps) {
             <button
               key={String(m.value)}
               onClick={() => setMesLocal(m.value as number | "Todos")}
-              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                mesLocal === m.value
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted text-muted-foreground hover:bg-muted/80"
-              }`}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${mesLocal === m.value ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-muted/80"}`}
             >
               {m.label}
             </button>
@@ -983,7 +1243,6 @@ function TabPorCC({ plan, filtros }: TabProps) {
           </button>
         </div>
       </div>
-
       {isLoading ? (
         <div className="space-y-1">
           {Array.from({ length: 8 }).map((_, i) => (
@@ -1018,30 +1277,272 @@ function TabPorCC({ plan, filtros }: TabProps) {
             </thead>
             <tbody>
               <SH label="INGRESOS OPERACIONALES" k="ing" />
-              {openSec.has("ing") && ingCuentas.map((r, i) => <CR key={r.orden} row={r} idx={i} />)}
+              {openSec.has("ing") && ingC.map((r, i) => <CR key={r.orden} row={r} idx={i} />)}
               {openSec.has("ing") && <TR label="TOTAL INGRESOS OPERACIONALES" vals={vIng} />}
-
               <SH label="COSTOS DE VENTAS" k="cost" />
-              {openSec.has("cost") && costCuentas.map((r, i) => <CR key={r.orden} row={r} idx={i} />)}
+              {openSec.has("cost") && costC.map((r, i) => <CR key={r.orden} row={r} idx={i} />)}
               {openSec.has("cost") && <TR label="TOTAL COSTOS" vals={vCost} />}
-
               <SR label="UTILIDAD BRUTA" vals={vUB} />
-
               <SH label="GASTOS OPERACIONALES" k="gop" />
               {openSec.has("gop") && gopTree && <GasTree n1={gopTree} />}
               <SR label="UTILIDAD OPERACIONAL" vals={vUO} />
-
               <SH label="OTROS INGRESOS" k="oi" />
-              {openSec.has("oi") && oiCuentas.map((r, i) => <CR key={r.orden} row={r} idx={i} />)}
+              {openSec.has("oi") && oiC.map((r, i) => <CR key={r.orden} row={r} idx={i} />)}
               {openSec.has("oi") && <TR label="TOTAL OTROS INGRESOS" vals={vOI} />}
-
               <SH label="OTROS GASTOS" k="og" />
               {openSec.has("og") && gnopTree && <GasTree n1={gnopTree} />}
-
               <SR label="UTILIDAD ANTES DE IMPUESTOS" vals={vUAI} />
             </tbody>
           </table>
         </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────
+// TAB AUDITORÍA — pestaña 4
+// ─────────────────────────────────────────────
+function TabAuditoria({ plan, filtros, ctx }: { plan: PlanQuery; filtros: FiltroDashboard; ctx: AuditoriaCtx | null }) {
+  const planRows: PlanPygRow[] = plan.data ?? [];
+
+  // Filtros locales — preseleccionados desde ctx si viene de "Ver detalle →"
+  const [ordenSelec, setOrdenSelec] = useState<number | null>(ctx?.orden ?? null);
+  const [ccSelec, setCcSelec] = useState<string>(ctx?.ccKey ?? "Todas");
+  const [mesSelec, setMesSelec] = useState<number | "Todos">(ctx?.mes ?? "Todos");
+  const [search, setSearch] = useState("");
+  const [pagina, setPagina] = useState(0);
+  const POR_PAGINA = 50;
+
+  // Sincronizar cuando llega un nuevo ctx (usuario hace clic en otro "Ver detalle →")
+  const prevCtxRef = { orden: ctx?.orden, cc: ctx?.ccKey, mes: ctx?.mes };
+
+  const cuentasDetalle = planRows.filter(
+    (r) => r.nivel === "Cuenta" && ["4", "5", "6"].includes(String((r as any).clase_cod)),
+  );
+
+  const auditoria = useEriAuditoria({
+    año: filtros.año,
+    compania: filtros.compania,
+    mes: mesSelec,
+    ccKey: ccSelec,
+    orden: ordenSelec,
+    search,
+  });
+
+  const rows = auditoria.data ?? [];
+  const totalPaginas = Math.ceil(rows.length / POR_PAGINA);
+  const paginados = rows.slice(pagina * POR_PAGINA, (pagina + 1) * POR_PAGINA);
+  const totalGeneral = rows.reduce((s, r) => s + (Number(r.valor_pyg) || 0), 0);
+
+  const año = filtros.año === "Todas" ? 2026 : Number(filtros.año);
+  const meses = [
+    { value: "Todos" as const, label: "Todos los meses" },
+    ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((m) => ({ value: año * 100 + m, label: mesLabel(año * 100 + m) })),
+  ];
+  const ccOpciones = [{ key: "Todas", label: "Todos los CC" }, ...CC_KEYS];
+
+  const ccLabel = (k: string) => CC_KEYS.find((c) => c.key === k)?.label ?? k;
+
+  return (
+    <div>
+      {/* Filtros */}
+      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+        {/* Cuenta */}
+        <div>
+          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Cuenta
+          </label>
+          <select
+            value={ordenSelec ?? ""}
+            onChange={(e) => {
+              setOrdenSelec(e.target.value ? Number(e.target.value) : null);
+              setPagina(0);
+            }}
+            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+          >
+            <option value="">-- Selecciona una cuenta --</option>
+            {cuentasDetalle.map((r) => (
+              <option key={r.orden} value={r.orden}>
+                {r.etiqueta_fila || r.concepto}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Mes */}
+        <div>
+          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Mes
+          </label>
+          <select
+            value={String(mesSelec)}
+            onChange={(e) => {
+              setMesSelec(e.target.value === "Todos" ? "Todos" : Number(e.target.value));
+              setPagina(0);
+            }}
+            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+          >
+            {meses.map((m) => (
+              <option key={String(m.value)} value={String(m.value)}>
+                {m.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* CC */}
+        <div>
+          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Centro de costo
+          </label>
+          <select
+            value={ccSelec}
+            onChange={(e) => {
+              setCcSelec(e.target.value);
+              setPagina(0);
+            }}
+            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground"
+          >
+            {ccOpciones.map((c) => (
+              <option key={c.key} value={c.key}>
+                {c.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Buscador */}
+        <div>
+          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Buscar tercero / NIT
+          </label>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPagina(0);
+            }}
+            placeholder="Nombre o NIT..."
+            className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground/50"
+          />
+        </div>
+      </div>
+
+      {/* Tabla */}
+      {!ordenSelec ? (
+        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+          <div className="mb-2 text-4xl">🔍</div>
+          <div className="text-sm">Selecciona una cuenta para auditar</div>
+        </div>
+      ) : auditoria.isLoading ? (
+        <div className="space-y-2">
+          {Array.from({ length: 10 }).map((_, i) => (
+            <LoadingSkeleton key={i} className="h-8 w-full" />
+          ))}
+        </div>
+      ) : auditoria.isError ? (
+        <ErrorState />
+      ) : rows.length === 0 ? (
+        <EmptyState />
+      ) : (
+        <>
+          {/* Info */}
+          <div className="mb-2 flex items-center justify-between text-[11px] text-muted-foreground">
+            <span>{rows.length.toLocaleString()} registros encontrados</span>
+            <span>
+              Total:{" "}
+              <span
+                className={`font-semibold tabular-nums ${totalGeneral < 0 ? "text-destructive" : "text-foreground"}`}
+              >
+                {fmtCell(totalGeneral).text}
+              </span>
+            </span>
+          </div>
+
+          <div className="overflow-auto rounded-lg border border-border">
+            <table className="w-full border-collapse text-[11px]">
+              <thead className="sticky top-0 z-10 bg-card">
+                <tr className="border-b border-border">
+                  <th className="min-w-[200px] px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Tercero
+                  </th>
+                  <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    NIT
+                  </th>
+                  <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    CC
+                  </th>
+                  <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Mes
+                  </th>
+                  <th className="px-3 py-2 text-right text-[10px] font-semibold uppercase tracking-wider text-primary">
+                    Valor
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginados.map((r, i) => {
+                  const f = fmtCell(Number(r.valor_pyg));
+                  return (
+                    <tr key={i} className={`border-b border-border/30 ${i % 2 === 0 ? "bg-background/20" : ""}`}>
+                      <td className="px-3 py-1.5 text-foreground">
+                        {r.nombre_tercero || r.tercero_key || "Sin identificar"}
+                      </td>
+                      <td className="px-3 py-1.5 font-mono text-muted-foreground">{r.tercero_key || "-"}</td>
+                      <td className="px-3 py-1.5 text-muted-foreground">{ccLabel(r.cc_key)}</td>
+                      <td className="px-3 py-1.5 text-muted-foreground">
+                        {r.año_mes_num ? mesLabel(Number(r.año_mes_num)) : "-"}
+                      </td>
+                      <td
+                        className={`px-3 py-1.5 text-right font-semibold tabular-nums ${f.neg ? "text-destructive" : f.zero ? "text-muted-foreground" : "text-foreground"}`}
+                      >
+                        {f.text}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              {/* Total pie */}
+              <tfoot>
+                <tr className="border-t border-border bg-card">
+                  <td colSpan={4} className="px-3 py-2 text-[11px] font-bold text-muted-foreground">
+                    Total {rows.length > POR_PAGINA ? `(página ${pagina + 1} de ${totalPaginas})` : ""}
+                  </td>
+                  <td
+                    className={`px-3 py-2 text-right font-bold tabular-nums text-[11px] ${totalGeneral < 0 ? "text-destructive" : "text-foreground"}`}
+                  >
+                    {fmtCell(totalGeneral).text}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          {/* Paginación */}
+          {totalPaginas > 1 && (
+            <div className="mt-3 flex items-center justify-center gap-2">
+              <button
+                disabled={pagina === 0}
+                onClick={() => setPagina((p) => p - 1)}
+                className="rounded-md border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-muted disabled:opacity-30"
+              >
+                ← Anterior
+              </button>
+              <span className="text-xs text-muted-foreground">
+                {pagina + 1} / {totalPaginas}
+              </span>
+              <button
+                disabled={pagina >= totalPaginas - 1}
+                onClick={() => setPagina((p) => p + 1)}
+                className="rounded-md border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-muted disabled:opacity-30"
+              >
+                Siguiente →
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
