@@ -39,15 +39,29 @@ export interface EriResumidaRow {
   valor_pyg: number;
 }
 
-export interface EriCompactRow {
+export interface EriDetalleRow {
   orden: number;
   año_mes_num: number;
   cc_key: string;
   compania: string;
   valor_pyg: number;
-  tercero_key?: string;
-  nombre_tercero?: string;
-  concepto?: string;
+  tercero_key: string;
+  nombre_tercero: string;
+}
+
+export interface GastoTerceroRow {
+  compania: string;
+  cc_key: string;
+  año_mes_num: number;
+  cuenta_key: string;
+  tipo_gasto: string;
+  detalle_gasto: string;
+  nombre_cuenta: string;
+  orden_tipo: number;
+  orden_detalle: number;
+  nit: string;
+  tercero_nombre: string;
+  gasto_real: number;
 }
 
 export function usePlanPyg() {
@@ -121,38 +135,97 @@ export function useEriAllCC(filtros: { año: number | "Todas"; compania: string;
   });
 }
 
-// FIX: usar select("*") para evitar el error de parsing con "año_mes_num" en el string
-export function useEriDetalleTerceros(filtros: { año: number | "Todas"; compania: string; orden: number | null }) {
+// Conteo de terceros únicos por orden — decide si inline o botón
+export function useEriTerceroCount(filtros: { año: number | "Todas"; compania: string; mes: number | "Todos" }) {
   return useQuery({
-    queryKey: ["eri-detalle-terceros", filtros],
-    enabled: filtros.orden !== null,
-    queryFn: async (): Promise<EriCompactRow[]> => {
+    queryKey: ["eri-tercero-count", filtros],
+    queryFn: async (): Promise<Record<number, number>> => {
+      let q = supabase.from("v_eri_por_mes").select("orden, tercero_key, cc_key");
+      if (filtros.año !== "Todas") {
+        q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
+      }
+      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+      if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
+      const { data, error } = await q.limit(10000);
+      if (error) throw error;
+      // Contar combinaciones únicas tercero+cc por orden
+      const counts: Record<number, Set<string>> = {};
+      for (const r of (data ?? []) as any[]) {
+        if (!counts[r.orden]) counts[r.orden] = new Set();
+        counts[r.orden].add(`${r.tercero_key}||${r.cc_key}`);
+      }
+      const result: Record<number, number> = {};
+      for (const [ord, set] of Object.entries(counts)) {
+        result[Number(ord)] = set.size;
+      }
+      return result;
+    },
+  });
+}
+
+// Detalle de terceros para drill-down inline (solo cuentas con ≤ 20 terceros)
+// Agrupa por tercero+cc+mes para mostrar el detalle completo
+export function useEriDetalle(filtros: {
+  año: number | "Todas";
+  compania: string;
+  mes: number | "Todos";
+  orden: number | null;
+  enabled: boolean;
+}) {
+  return useQuery({
+    queryKey: ["eri-detalle", filtros],
+    enabled: filtros.enabled && filtros.orden !== null,
+    queryFn: async (): Promise<EriDetalleRow[]> => {
       if (!filtros.orden) return [];
       let q = supabase.from("v_eri_por_mes").select("*").eq("orden", filtros.orden);
       if (filtros.año !== "Todas") {
         q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
       }
       if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+      if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
       const { data, error } = await q.limit(2000);
       if (error) throw error;
-      return (data ?? []) as unknown as EriCompactRow[];
+      return (data ?? []) as unknown as EriDetalleRow[];
     },
   });
 }
 
-export interface GastoTerceroRow {
+// Auditoría: detalle completo de una cuenta con paginación
+export function useEriAuditoria(filtros: {
+  año: number | "Todas";
   compania: string;
-  cc_key: string;
-  año_mes_num: number;
-  cuenta_key: string;
-  tipo_gasto: string;
-  detalle_gasto: string;
-  nombre_cuenta: string;
-  orden_tipo: number;
-  orden_detalle: number;
-  nit: string;
-  tercero_nombre: string;
-  gasto_real: number;
+  mes: number | "Todos";
+  ccKey: string;
+  orden: number | null;
+  search: string;
+}) {
+  return useQuery({
+    queryKey: ["eri-auditoria", filtros],
+    enabled: filtros.orden !== null,
+    queryFn: async (): Promise<EriDetalleRow[]> => {
+      if (!filtros.orden) return [];
+      let q = supabase.from("v_eri_por_mes").select("*").eq("orden", filtros.orden);
+      if (filtros.año !== "Todas") {
+        q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
+      }
+      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+      if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
+      if (filtros.ccKey !== "Todas") q = q.eq("cc_key", filtros.ccKey);
+      const { data, error } = await q.limit(5000);
+      if (error) throw error;
+      let rows = (data ?? []) as unknown as EriDetalleRow[];
+      // Filtro de búsqueda en frontend
+      if (filtros.search.trim()) {
+        const term = filtros.search.toLowerCase();
+        rows = rows.filter(
+          (r) => r.nombre_tercero?.toLowerCase().includes(term) || r.tercero_key?.toLowerCase().includes(term),
+        );
+      }
+      // Ordenar mayor a menor por valor absoluto
+      rows.sort((a, b) => Math.abs(Number(b.valor_pyg)) - Math.abs(Number(a.valor_pyg)));
+      return rows;
+    },
+  });
 }
 
 export function useGastosTercero(filtros: {
