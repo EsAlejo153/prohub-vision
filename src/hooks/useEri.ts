@@ -29,7 +29,11 @@ export function usePlanPyg() {
   return useQuery({
     queryKey: ["plan_pyg"],
     queryFn: async (): Promise<PlanPygRow[]> => {
-      const { data, error } = await supabase.from("plan_pyg").select("*").order("orden", { ascending: true });
+      const { data, error } = await supabase
+        .from("plan_pyg")
+        .select("*")
+        .order("orden", { ascending: true })
+        .limit(500);
       if (error) throw error;
       return (data ?? []) as PlanPygRow[];
     },
@@ -45,7 +49,7 @@ export function useEri(filtros: FiltroDashboard) {
       if (range) q = q.gte("año_mes_num", range.min).lte("año_mes_num", range.max);
       if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
       if (filtros.ccKey !== "Todas") q = q.eq("cc_key", filtros.ccKey);
-      const { data, error } = await q;
+      const { data, error } = await q.limit(5000);
       if (error) throw error;
       return (data ?? []) as EriValueRow[];
     },
@@ -72,8 +76,8 @@ export function useEriAllMonths(filtros: { año: number | "Todas"; compania: str
       if (filtros.ccKey !== "TODOS") q = q.eq("cc_key", filtros.ccKey);
       const { data, error } = await q
         .order("orden", { ascending: true })
-        .order("cc_key", { ascending: true })
-        .limit(10000);
+        .order("año_mes_num", { ascending: true })
+        .limit(5000);
       if (error) throw error;
       return (data ?? []) as unknown as EriCompactRow[];
     },
@@ -90,7 +94,11 @@ export function useEriAllCC(filtros: { año: number | "Todas"; compania: string;
       }
       if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
       if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
-      const { data, error } = await q.order("orden", { ascending: true }).order("cc_key", { ascending: true });
+      // CRÍTICO: sin este límite Supabase corta en 1000 y los costos (1533 filas) no llegan
+      const { data, error } = await q
+        .order("orden", { ascending: true })
+        .order("cc_key", { ascending: true })
+        .limit(5000);
       if (error) throw error;
       return (data ?? []) as unknown as EriCompactRow[];
     },
@@ -128,7 +136,7 @@ export function useGastosTercero(filtros: {
       if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
       if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
       if (filtros.ccKey !== "TODOS") q = q.eq("cc_key", filtros.ccKey);
-      const { data, error } = await q;
+      const { data, error } = await q.limit(5000);
       if (error) throw error;
       return (data ?? []) as unknown as GastoTerceroRow[];
     },
@@ -145,7 +153,7 @@ export function useGastosPorCC(filtros: { año: number | "Todas"; mes: number | 
       }
       if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
       if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
-      const { data, error } = await q;
+      const { data, error } = await q.limit(5000);
       if (error) throw error;
       return (data ?? []) as unknown as GastoTerceroRow[];
     },
