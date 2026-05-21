@@ -13,12 +13,13 @@ import {
   type GastoTerceroRow,
   type PlanPygRow,
   type EriDetalleRow,
+  type EriResumidaRow,
 } from "@/hooks/useEri";
 import { EmptyState, ErrorState, LoadingSkeleton } from "@/components/dashboard/StateMessages";
 import type { FiltroDashboard } from "@/types/financiero";
 
 const MES_LABELS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
-const UMBRAL_TERCEROS = 20; // ≤ 20 → inline, > 20 → botón auditoría
+const UMBRAL_TERCEROS = 20;
 
 function mesLabel(yyyymm: number) {
   const y = Math.floor(yyyymm / 100);
@@ -33,6 +34,10 @@ function fmtCell(v: number | null | undefined): { text: string; neg: boolean; ze
   return { text: v.toLocaleString("es-CO", { maximumFractionDigits: 0 }), neg: false, zero: false };
 }
 
+// Helper para normalizar clase_cod y grupo_cod siempre como string limpio
+const claseCod = (r: PlanPygRow) => String((r as any).clase_cod ?? "").trim();
+const grupoCod = (r: PlanPygRow) => String((r as any).grupo_cod ?? "").trim();
+
 const sumAll = (vals: Record<string, number>) => Object.values(vals).reduce((s, v) => s + v, 0);
 
 const CC_KEYS = [
@@ -45,12 +50,147 @@ const CENTROS = [{ key: "TODOS", label: "Consolidado" }, ...CC_KEYS];
 
 type TabId = "periodo" | "mes-a-mes" | "por-cc" | "auditoria";
 
-// Contexto compartido para navegación a auditoría
 interface AuditoriaCtx {
   orden: number;
   concepto: string;
   ccKey: string;
   mes: number | "Todos";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LÓGICA CENTRAL COMPARTIDA: calcula subtotales desde v_eri_resumida
+// Esta función es la fuente única de verdad para las tres tabs
+// ─────────────────────────────────────────────────────────────────────────────
+function calcSubtotales(planRows: PlanPygRow[], valueMap: Map<number, number>) {
+  // Ingresos operacionales (clase 4, grupo 41)
+  const ingC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "4" && grupoCod(r) === "41");
+  // Costos (clase 6)
+  const costC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "6");
+  // Gastos operacionales (clase 5, grupos 51 y 52)
+  const gastOpC = planRows.filter(
+    (r) => r.nivel === "Cuenta" && claseCod(r) === "5" && ["51", "52"].includes(grupoCod(r)),
+  );
+  // Gastos no operacionales (clase 5, grupo 53)
+  const gastNoOpC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "5" && grupoCod(r) === "53");
+  // Otros ingresos (clase 4, grupo 42)
+  const oiC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "4" && grupoCod(r) === "42");
+
+  const sumOrden = (rows: PlanPygRow[]) => rows.reduce((s, r) => s + (valueMap.get(r.orden) ?? 0), 0);
+
+  const ing = sumOrden(ingC);
+  const cost = sumOrden(costC);
+  const ub = ing + cost;
+  const gop = sumOrden(gastOpC);
+  const uo = ub - gop;
+  const oi = sumOrden(oiC);
+  const gnop = sumOrden(gastNoOpC);
+  const uai = uo + oi - gnop;
+
+  return { ing, cost, ub, gop, uo, oi, gnop, uai, ingC, costC, gastOpC, gastNoOpC, oiC };
+}
+
+// Versión por mes para TabMesAMes
+function calcSubtotalesPorMes(planRows: PlanPygRow[], valueMap: Map<number, Map<number, number>>, months: number[]) {
+  const ingC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "4" && grupoCod(r) === "41");
+  const costC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "6");
+  const gastOpC = planRows.filter(
+    (r) => r.nivel === "Cuenta" && claseCod(r) === "5" && ["51", "52"].includes(grupoCod(r)),
+  );
+  const gastNoOpC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "5" && grupoCod(r) === "53");
+  const oiC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "4" && grupoCod(r) === "42");
+
+  const sumOrdenMes = (rows: PlanPygRow[], m: number) =>
+    rows.reduce((s, r) => s + (valueMap.get(r.orden)?.get(m) ?? 0), 0);
+
+  const ingMes = months.map((m) => sumOrdenMes(ingC, m));
+  const costMes = months.map((m) => sumOrdenMes(costC, m));
+  const ubMes = months.map((_, i) => ingMes[i] + costMes[i]);
+  const gopMes = months.map((m) => sumOrdenMes(gastOpC, m));
+  const uoMes = months.map((_, i) => ubMes[i] - gopMes[i]);
+  const oiMes = months.map((m) => sumOrdenMes(oiC, m));
+  const gnopMes = months.map((m) => sumOrdenMes(gastNoOpC, m));
+  const uaiMes = months.map((_, i) => uoMes[i] + oiMes[i] - gnopMes[i]);
+
+  const sum = (a: number[]) => a.reduce((s, v) => s + v, 0);
+
+  return {
+    ingMes,
+    ing: sum(ingMes),
+    costMes,
+    cost: sum(costMes),
+    ubMes,
+    ub: sum(ubMes),
+    gopMes,
+    gop: sum(gopMes),
+    uoMes,
+    uo: sum(uoMes),
+    oiMes,
+    oi: sum(oiMes),
+    gnopMes,
+    gnop: sum(gnopMes),
+    uaiMes,
+    uai: sum(uaiMes),
+    ingC,
+    costC,
+    gastOpC,
+    gastNoOpC,
+    oiC,
+  };
+}
+
+// Versión por CC para TabPorCC
+function calcSubtotalesPorCC(
+  planRows: PlanPygRow[],
+  eriMap: Map<number, Map<string, number>>,
+): {
+  vIng: VCC;
+  vCost: VCC;
+  vUB: VCC;
+  vGop: VCC;
+  vUO: VCC;
+  vOI: VCC;
+  vGnop: VCC;
+  vUAI: VCC;
+  ingC: PlanPygRow[];
+  costC: PlanPygRow[];
+  gastOpC: PlanPygRow[];
+  gastNoOpC: PlanPygRow[];
+  oiC: PlanPygRow[];
+} {
+  const ingC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "4" && grupoCod(r) === "41");
+  const costC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "6");
+  const gastOpC = planRows.filter(
+    (r) => r.nivel === "Cuenta" && claseCod(r) === "5" && ["51", "52"].includes(grupoCod(r)),
+  );
+  const gastNoOpC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "5" && grupoCod(r) === "53");
+  const oiC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "4" && grupoCod(r) === "42");
+
+  const acumCC = (rows: PlanPygRow[]): VCC => {
+    const out: VCC = {};
+    for (const r of rows) {
+      const inner = eriMap.get(r.orden);
+      if (!inner) continue;
+      for (const [cc, v] of inner.entries()) out[cc] = (out[cc] ?? 0) + v;
+    }
+    return out;
+  };
+
+  const vIng = acumCC(ingC);
+  const vCost = acumCC(costC);
+  const vGop = acumCC(gastOpC);
+  const vOI = acumCC(oiC);
+  const vGnop = acumCC(gastNoOpC);
+
+  const vUB: VCC = {};
+  const vUO: VCC = {};
+  const vUAI: VCC = {};
+  for (const cc of CC_KEYS) {
+    vUB[cc.key] = (vIng[cc.key] ?? 0) + (vCost[cc.key] ?? 0);
+    vUO[cc.key] = vUB[cc.key] - (vGop[cc.key] ?? 0);
+    vUAI[cc.key] = vUO[cc.key] + (vOI[cc.key] ?? 0) - (vGnop[cc.key] ?? 0);
+  }
+
+  return { vIng, vCost, vUB, vGop, vUO, vOI, vGnop, vUAI, ingC, costC, gastOpC, gastNoOpC, oiC };
 }
 
 export default function Eri() {
@@ -121,10 +261,6 @@ function CcPills({ value, onChange }: { value: string; onChange: (v: string) => 
   );
 }
 
-// ─────────────────────────────────────────────
-// COMPONENTE REUTILIZABLE: Filas de detalle inline
-// Muestra tercero | NIT | CC | meses... | total
-// ─────────────────────────────────────────────
 function DetalleInline({
   orden,
   filtros,
@@ -158,7 +294,6 @@ function DetalleInline({
 
   const rows = detalle.data ?? [];
 
-  // Agrupar por tercero+cc, calcular por mes
   const grouped = new Map<
     string,
     { nombre: string; nit: string; cc: string; porMes: Map<number, number>; total: number }
@@ -175,12 +310,11 @@ function DetalleInline({
       });
     }
     const g = grouped.get(key)!;
-    const mes = Number(r.año_mes_num);
-    g.porMes.set(mes, (g.porMes.get(mes) ?? 0) + (Number(r.valor_pyg) || 0));
+    const m = Number(r.año_mes_num);
+    g.porMes.set(m, (g.porMes.get(m) ?? 0) + (Number(r.valor_pyg) || 0));
     g.total += Number(r.valor_pyg) || 0;
   }
 
-  // Ordenar mayor a menor por valor absoluto
   const sorted = Array.from(grouped.values()).sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
 
   if (sorted.length === 0) {
@@ -197,7 +331,6 @@ function DetalleInline({
 
   return (
     <>
-      {/* Sub-encabezado */}
       <tr style={{ background: "#050a14" }}>
         <td className="px-6 py-1 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/50">
           Tercero
@@ -267,16 +400,17 @@ function TabPeriodo({ plan, filtros, onAuditoria }: TabProps) {
     mes: mesActivo,
   });
 
-  const { planRows, valueMap, ingresosTotales } = useMemo(() => {
+  const { planRows, valueMap, subtotales } = useMemo(() => {
     const planRows: PlanPygRow[] = plan.data ?? [];
     const map = new Map<number, number>();
     for (const r of eri.data ?? []) {
       map.set(r.orden, (map.get(r.orden) ?? 0) + (Number(r.valor_pyg) || 0));
     }
-    const ingresos = Math.abs(map.get(15) ?? 0) || 1;
-    return { planRows, valueMap: map, ingresosTotales: ingresos };
+    const subtotales = calcSubtotales(planRows, map);
+    return { planRows, valueMap: map, subtotales };
   }, [plan.data, eri.data]);
 
+  const ingresosTotales = Math.abs(subtotales.ing) || 1;
   const isLoading = plan.isLoading || eri.isLoading;
   const isError = plan.isError || eri.isError;
   const ccLabel = CENTROS.find((c) => c.key === ccActivo)?.label;
@@ -294,8 +428,14 @@ function TabPeriodo({ plan, filtros, onAuditoria }: TabProps) {
       return s;
     });
 
-  const esCuentaDetalle = (row: PlanPygRow) =>
-    row.nivel === "Cuenta" && ["4", "5", "6"].includes(String((row as any).clase_cod));
+  const esCuentaDetalle = (row: PlanPygRow) => row.nivel === "Cuenta" && ["4", "5", "6"].includes(claseCod(row));
+
+  // Filas sintéticas de subtotales para inyectar en la tabla
+  const subtotalRows = [
+    { key: "ub", label: "UTILIDAD BRUTA", value: subtotales.ub },
+    { key: "uo", label: "UTILIDAD OPERACIONAL", value: subtotales.uo },
+    { key: "uai", label: "UTILIDAD ANTES DE IMPUESTOS", value: subtotales.uai },
+  ];
 
   return (
     <div>
@@ -347,59 +487,97 @@ function TabPeriodo({ plan, filtros, onAuditoria }: TabProps) {
                     : isSubtotal
                       ? "#0d2040"
                       : undefined;
+
+                // Inyectar filas de subtotal calculado justo antes del título correspondiente
+                const subtotalAntes = (() => {
+                  if (row.nivel === "Titulo" && claseCod(row) === "5" && grupoCod(row) === "51") {
+                    return subtotalRows.find((s) => s.key === "ub");
+                  }
+                  if (row.nivel === "Titulo" && claseCod(row) === "4" && grupoCod(row) === "42") {
+                    return subtotalRows.find((s) => s.key === "uo");
+                  }
+                  if (row.nivel === "Subtotal") {
+                    return subtotalRows.find((s) => s.key === "uai");
+                  }
+                  return null;
+                })();
+
                 const esDetalle = esCuentaDetalle(row);
                 const count = terceroCount.data?.[row.orden] ?? 0;
                 const isOpen = openRows.has(row.orden);
 
                 return (
                   <Fragment key={row.orden}>
-                    <tr className="border-b border-border/40" style={{ background: bg, fontWeight: bold ? 700 : 400 }}>
-                      <td className="px-3 py-1.5 text-foreground">
-                        <div className="flex items-center gap-2">
-                          {esDetalle && count > 0 && count <= UMBRAL_TERCEROS && (
-                            <button
-                              onClick={() => toggleRow(row.orden)}
-                              className="text-[9px] text-muted-foreground/60 hover:text-primary transition-colors"
+                    {/* Fila de subtotal calculado inyectada antes si corresponde */}
+                    {subtotalAntes && (
+                      <tr
+                        className="border-b border-border border-l-2 border-l-primary"
+                        style={{ background: "#0d2040", fontWeight: 700 }}
+                      >
+                        <td className="px-3 py-2 text-[12px] font-bold text-foreground">{subtotalAntes.label}</td>
+                        <td
+                          className={`whitespace-nowrap px-3 py-1.5 text-right font-bold tabular-nums ${subtotalAntes.value < 0 ? "text-destructive" : subtotalAntes.value === 0 ? "text-muted-foreground" : "text-primary"}`}
+                        >
+                          {fmtCell(subtotalAntes.value).text}
+                        </td>
+                        <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                          {ingresosTotales ? `${((subtotalAntes.value / ingresosTotales) * 100).toFixed(2)}%` : ""}
+                        </td>
+                      </tr>
+                    )}
+                    {/* Ocultar la fila Subtotal original del plan_pyg (ya la reemplazamos) */}
+                    {row.nivel !== "Subtotal" && (
+                      <tr
+                        className="border-b border-border/40"
+                        style={{ background: bg, fontWeight: bold ? 700 : 400 }}
+                      >
+                        <td className="px-3 py-1.5 text-foreground">
+                          <div className="flex items-center gap-2">
+                            {esDetalle && count > 0 && count <= UMBRAL_TERCEROS && (
+                              <button
+                                onClick={() => toggleRow(row.orden)}
+                                className="text-[9px] text-muted-foreground/60 hover:text-primary transition-colors"
+                              >
+                                {isOpen ? "▾" : "▸"}
+                              </button>
+                            )}
+                            <span>{row.etiqueta_fila || row.concepto}</span>
+                            {esDetalle && count > UMBRAL_TERCEROS && (
+                              <button
+                                onClick={() =>
+                                  onAuditoria({
+                                    orden: row.orden,
+                                    concepto: row.etiqueta_fila || row.concepto,
+                                    ccKey: ccActivo === "TODOS" ? "Todas" : ccActivo,
+                                    mes: mesActivo,
+                                  })
+                                }
+                                className="ml-auto text-[9px] text-primary/70 hover:text-primary border border-primary/30 rounded px-1.5 py-0.5 transition-colors"
+                              >
+                                Ver detalle →
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                        {isTitulo ? (
+                          <>
+                            <td />
+                            <td />
+                          </>
+                        ) : (
+                          <>
+                            <td
+                              className={`whitespace-nowrap px-3 py-1.5 text-right tabular-nums ${f.neg ? "text-destructive" : f.zero ? "text-muted-foreground" : "text-foreground"}`}
                             >
-                              {isOpen ? "▾" : "▸"}
-                            </button>
-                          )}
-                          <span>{row.etiqueta_fila || row.concepto}</span>
-                          {esDetalle && count > UMBRAL_TERCEROS && (
-                            <button
-                              onClick={() =>
-                                onAuditoria({
-                                  orden: row.orden,
-                                  concepto: row.etiqueta_fila || row.concepto,
-                                  ccKey: ccActivo === "TODOS" ? "Todas" : ccActivo,
-                                  mes: mesActivo,
-                                })
-                              }
-                              className="ml-auto text-[9px] text-primary/70 hover:text-primary border border-primary/30 rounded px-1.5 py-0.5 transition-colors"
-                            >
-                              Ver detalle →
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                      {isTitulo ? (
-                        <>
-                          <td />
-                          <td />
-                        </>
-                      ) : (
-                        <>
-                          <td
-                            className={`whitespace-nowrap px-3 py-1.5 text-right tabular-nums ${f.neg ? "text-destructive" : f.zero ? "text-muted-foreground" : "text-foreground"}`}
-                          >
-                            {f.text}
-                          </td>
-                          <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-                            {pct != null ? `${pct.toFixed(2)}%` : ""}
-                          </td>
-                        </>
-                      )}
-                    </tr>
+                              {f.text}
+                            </td>
+                            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                              {pct != null ? `${pct.toFixed(2)}%` : ""}
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    )}
                     {isOpen && esDetalle && count <= UMBRAL_TERCEROS && (
                       <DetalleInline orden={row.orden} filtros={filtros} showMonths={false} mes={mesActivo} />
                     )}
@@ -422,7 +600,6 @@ function TabMesAMes({ plan, filtros, onAuditoria }: TabProps) {
   const [openRows, setOpenRows] = useState<Set<number>>(new Set());
 
   const eriAll = useEriAllMonths({ año: filtros.año, compania: filtros.compania, ccKey: ccActivo });
-  const gastosAll = useGastosPorCC({ año: filtros.año, mes: "Todos", compania: filtros.compania });
 
   const terceroCount = useEriTerceroCount({
     año: filtros.año,
@@ -432,7 +609,8 @@ function TabMesAMes({ plan, filtros, onAuditoria }: TabProps) {
 
   const planRows: PlanPygRow[] = plan.data ?? [];
 
-  const { valueMap, months } = useMemo(() => {
+  // Todo desde v_eri_resumida — sin v_gastos_por_tercero
+  const { valueMap, months, sub } = useMemo(() => {
     const valueMap = new Map<number, Map<number, number>>();
     const monthSet = new Set<number>();
     for (const r of eriAll.data ?? []) {
@@ -443,72 +621,14 @@ function TabMesAMes({ plan, filtros, onAuditoria }: TabProps) {
       const inner = valueMap.get(r.orden)!;
       inner.set(mes, (inner.get(mes) ?? 0) + (Number(r.valor_pyg) || 0));
     }
-    return { valueMap, months: Array.from(monthSet).sort((a, b) => a - b) };
-  }, [eriAll.data]);
-
-  const gastosOperPorMes = useMemo(() => {
-    const m = new Map<number, number>();
-    for (const r of gastosAll.data ?? []) {
-      if (r.tipo_gasto !== "01.GASTOS OPERACIONALES") continue;
-      if (ccActivo !== "TODOS" && r.cc_key !== ccActivo) continue;
-      m.set(r.año_mes_num, (m.get(r.año_mes_num) ?? 0) + (Number(r.gasto_real) || 0));
-    }
-    return m;
-  }, [gastosAll.data, ccActivo]);
-
-  const gastosNoOperPorMes = useMemo(() => {
-    const m = new Map<number, number>();
-    for (const r of gastosAll.data ?? []) {
-      if (r.tipo_gasto !== "02.GASTO NO OPERACIONAL") continue;
-      if (ccActivo !== "TODOS" && r.cc_key !== ccActivo) continue;
-      m.set(r.año_mes_num, (m.get(r.año_mes_num) ?? 0) + (Number(r.gasto_real) || 0));
-    }
-    return m;
-  }, [gastosAll.data, ccActivo]);
-
-  const getMonthVals = (orden: number) => months.map((m) => valueMap.get(orden)?.get(m) ?? 0);
-  const getTotal = (orden: number) => getMonthVals(orden).reduce((s, v) => s + v, 0);
-
-  const sub = useMemo(() => {
-    const iC = planRows.filter(
-      (r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "4" && String((r as any).grupo_cod) === "41",
-    );
-    const cC = planRows.filter((r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "6");
-    const oiC = planRows.filter(
-      (r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "4" && String((r as any).grupo_cod) === "42",
-    );
-    const ingMes = months.map((m) => iC.reduce((s, r) => s + (valueMap.get(r.orden)?.get(m) ?? 0), 0));
-    const costMes = months.map((m) => cC.reduce((s, r) => s + (valueMap.get(r.orden)?.get(m) ?? 0), 0));
-    const ubMes = months.map((_, i) => ingMes[i] + costMes[i]);
-    const gopMes = months.map((m) => gastosOperPorMes.get(m) ?? 0);
-    const uoMes = months.map((_, i) => ubMes[i] - gopMes[i]);
-    const oiMes = months.map((m) => oiC.reduce((s, r) => s + (valueMap.get(r.orden)?.get(m) ?? 0), 0));
-    const gnopMes = months.map((m) => gastosNoOperPorMes.get(m) ?? 0);
-    const uaiMes = months.map((_, i) => uoMes[i] + oiMes[i] - gnopMes[i]);
-    const sum = (a: number[]) => a.reduce((s, v) => s + v, 0);
-    return {
-      ingMes,
-      ing: sum(ingMes),
-      costMes,
-      cost: sum(costMes),
-      ubMes,
-      ub: sum(ubMes),
-      gopMes,
-      gop: sum(gopMes),
-      uoMes,
-      uo: sum(uoMes),
-      oiMes,
-      oi: sum(oiMes),
-      gnopMes,
-      gnop: sum(gnopMes),
-      uaiMes,
-      uai: sum(uaiMes),
-    };
-  }, [planRows, valueMap, months, gastosOperPorMes, gastosNoOperPorMes]);
+    const months = Array.from(monthSet).sort((a, b) => a - b);
+    const sub = calcSubtotalesPorMes(planRows, valueMap, months);
+    return { valueMap, months, sub };
+  }, [eriAll.data, planRows]);
 
   const ingTot = Math.abs(sub.ing) || 1;
-  const isLoading = plan.isLoading || eriAll.isLoading || gastosAll.isLoading;
-  const isError = plan.isError || eriAll.isError || gastosAll.isError;
+  const isLoading = plan.isLoading || eriAll.isLoading;
+  const isError = plan.isError || eriAll.isError;
 
   const toggleRow = (orden: number) =>
     setOpenRows((p) => {
@@ -517,8 +637,10 @@ function TabMesAMes({ plan, filtros, onAuditoria }: TabProps) {
       return s;
     });
 
-  const esCuentaDetalle = (row: PlanPygRow) =>
-    row.nivel === "Cuenta" && ["4", "5", "6"].includes(String((row as any).clase_cod));
+  const esCuentaDetalle = (row: PlanPygRow) => row.nivel === "Cuenta" && ["4", "5", "6"].includes(claseCod(row));
+
+  const getMonthVals = (orden: number) => months.map((m) => valueMap.get(orden)?.get(m) ?? 0);
+  const getTotal = (orden: number) => getMonthVals(orden).reduce((s, v) => s + v, 0);
 
   const MC = ({ v, bold = false }: { v: number; bold?: boolean }) => {
     const f = fmtCell(v);
@@ -643,15 +765,6 @@ function TabMesAMes({ plan, filtros, onAuditoria }: TabProps) {
     </tr>
   );
 
-  const ingC = planRows.filter(
-    (r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "4" && String((r as any).grupo_cod) === "41",
-  );
-  const costC = planRows.filter((r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "6");
-  const gastC = planRows.filter((r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "5");
-  const oiC = planRows.filter(
-    (r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "4" && String((r as any).grupo_cod) === "42",
-  );
-
   return (
     <div>
       <div className="mb-4">
@@ -693,28 +806,35 @@ function TabMesAMes({ plan, filtros, onAuditoria }: TabProps) {
             </thead>
             <tbody>
               <SH label="INGRESOS OPERACIONALES" />
-              {ingC.map((r) => (
+              {sub.ingC.map((r) => (
                 <CuentaRow key={r.orden} row={r} />
               ))}
               <TotalRow label="TOTAL INGRESOS OPERACIONALES" mv={sub.ingMes} tot={sub.ing} />
+
               <SH label="COSTOS DE VENTAS" />
-              {costC.map((r) => (
+              {sub.costC.map((r) => (
                 <CuentaRow key={r.orden} row={r} />
               ))}
               <TotalRow label="TOTAL COSTOS" mv={sub.costMes} tot={sub.cost} />
               <SubRow label="UTILIDAD BRUTA" mv={sub.ubMes} tot={sub.ub} />
+
               <SH label="GASTOS OPERACIONALES" />
-              {gastC.map((r) => (
+              {sub.gastOpC.map((r) => (
                 <CuentaRow key={r.orden} row={r} />
               ))}
               <TotalRow label="TOTAL GASTOS OPERACIONALES" mv={sub.gopMes} tot={sub.gop} />
               <SubRow label="UTILIDAD OPERACIONAL" mv={sub.uoMes} tot={sub.uo} />
+
               <SH label="OTROS INGRESOS" />
-              {oiC.map((r) => (
+              {sub.oiC.map((r) => (
                 <CuentaRow key={r.orden} row={r} />
               ))}
               <TotalRow label="TOTAL OTROS INGRESOS" mv={sub.oiMes} tot={sub.oi} />
+
               <SH label="OTROS GASTOS" />
+              {sub.gastNoOpC.map((r) => (
+                <CuentaRow key={r.orden} row={r} />
+              ))}
               <TotalRow label="TOTAL OTROS GASTOS" mv={sub.gnopMes} tot={sub.gnop} />
               <SubRow label="UTILIDAD ANTES DE IMPUESTOS" mv={sub.uaiMes} tot={sub.uai} />
             </tbody>
@@ -726,7 +846,7 @@ function TabMesAMes({ plan, filtros, onAuditoria }: TabProps) {
 }
 
 // ─────────────────────────────────────────────
-// TAB POR CC (igual que antes + drill-down)
+// TAB POR CC
 // ─────────────────────────────────────────────
 interface VCC {
   [cc: string]: number;
@@ -761,8 +881,7 @@ function buildTree(rows: GastoTerceroRow[]): N1[] {
   }
   const n1Map = new Map<string, N1>();
   for (const [key, ccMap] of map.entries()) {
-    const parts = key.split("||");
-    const [tipo, det, nom, terc, nit] = parts;
+    const [tipo, det, nom, terc, nit] = key.split("||");
     const vals: VCC = {};
     for (const [cc, v] of ccMap.entries()) vals[cc] = v;
     if (!n1Map.has(tipo)) n1Map.set(tipo, { tipo_gasto: tipo, valores: {}, detalles: [] });
@@ -800,6 +919,7 @@ function buildTree(rows: GastoTerceroRow[]): N1[] {
 function TabPorCC({ plan, filtros, onAuditoria }: TabProps) {
   const [mesLocal, setMesLocal] = useState<number | "Todos">("Todos");
   const [openRows, setOpenRows] = useState<Set<number>>(new Set());
+
   const gastos = useGastosPorCC({ año: filtros.año, mes: mesLocal, compania: filtros.compania });
   const eriCC = useEriAllCC({ año: filtros.año, compania: filtros.compania, mes: mesLocal });
   const tree = useMemo(() => buildTree(gastos.data ?? []), [gastos.data]);
@@ -810,6 +930,7 @@ function TabPorCC({ plan, filtros, onAuditoria }: TabProps) {
     mes: mesLocal,
   });
 
+  // eriMap: orden → cc_key → valor (desde v_eri_resumida)
   const eriMap = useMemo(() => {
     const m = new Map<number, Map<string, number>>();
     for (const r of eriCC.data ?? []) {
@@ -819,6 +940,14 @@ function TabPorCC({ plan, filtros, onAuditoria }: TabProps) {
     }
     return m;
   }, [eriCC.data]);
+
+  const planRows: PlanPygRow[] = plan.data ?? [];
+
+  // Subtotales 100% desde v_eri_resumida
+  const { vIng, vCost, vUB, vGop, vUO, vOI, vGnop, vUAI, ingC, costC, gastOpC, gastNoOpC, oiC } = useMemo(
+    () => calcSubtotalesPorCC(planRows, eriMap),
+    [planRows, eriMap],
+  );
 
   const getVals = (orden: number): VCC => {
     const inner = eriMap.get(orden);
@@ -863,40 +992,6 @@ function TabPorCC({ plan, filtros, onAuditoria }: TabProps) {
       s.has(orden) ? s.delete(orden) : s.add(orden);
       return s;
     });
-
-  const planRows: PlanPygRow[] = plan.data ?? [];
-  const ingC = planRows.filter(
-    (r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "4" && String((r as any).grupo_cod) === "41",
-  );
-  const costC = planRows.filter((r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "6");
-  const oiC = planRows.filter(
-    (r) => r.nivel === "Cuenta" && String((r as any).clase_cod) === "4" && String((r as any).grupo_cod) === "42",
-  );
-
-  const vIng: VCC = {};
-  for (const row of ingC) {
-    const v = getVals(row.orden);
-    for (const [cc, val] of Object.entries(v)) vIng[cc] = (vIng[cc] ?? 0) + val;
-  }
-  const vCost: VCC = {};
-  for (const row of costC) {
-    const v = getVals(row.orden);
-    for (const [cc, val] of Object.entries(v)) vCost[cc] = (vCost[cc] ?? 0) + val;
-  }
-  const vUB: VCC = {};
-  for (const cc of CC_KEYS) vUB[cc.key] = (vIng[cc.key] ?? 0) + (vCost[cc.key] ?? 0);
-  const gopVals = tree.find((n) => n.tipo_gasto === "01.GASTOS OPERACIONALES")?.valores ?? {};
-  const vUO: VCC = {};
-  for (const cc of CC_KEYS) vUO[cc.key] = (vUB[cc.key] ?? 0) - (gopVals[cc.key] ?? 0);
-  const vOI: VCC = {};
-  for (const row of oiC) {
-    const v = getVals(row.orden);
-    for (const [cc, val] of Object.entries(v)) vOI[cc] = (vOI[cc] ?? 0) + val;
-  }
-  const gnopVals = tree.find((n) => n.tipo_gasto === "02.GASTO NO OPERACIONAL")?.valores ?? {};
-  const vUAI: VCC = {};
-  const allCCKeys = new Set([...CC_KEYS.map((c) => c.key), ...Object.keys(vOI), ...Object.keys(gnopVals)]);
-  for (const cc of allCCKeys) vUAI[cc] = (vUO[cc] ?? 0) + (vOI[cc] ?? 0) - (gnopVals[cc] ?? 0);
 
   const año = filtros.año === "Todas" ? 2026 : Number(filtros.año);
   const meses = [
@@ -1007,7 +1102,7 @@ function TabPorCC({ plan, filtros, onAuditoria }: TabProps) {
     if (CC_KEYS.every((cc) => (vals[cc.key] ?? 0) === 0) && cons === 0) return null;
     const count = terceroCount.data?.[row.orden] ?? 0;
     const isOpen = openRows.has(row.orden);
-    const esDetalle = ["4", "5", "6"].includes(String((row as any).clase_cod));
+    const esDetalle = ["4", "5", "6"].includes(claseCod(row));
     return (
       <Fragment key={row.orden}>
         <tr className={`border-b border-border/20 ${idx % 2 === 0 ? "bg-background/10" : ""}`}>
@@ -1279,18 +1374,24 @@ function TabPorCC({ plan, filtros, onAuditoria }: TabProps) {
               <SH label="INGRESOS OPERACIONALES" k="ing" />
               {openSec.has("ing") && ingC.map((r, i) => <CR key={r.orden} row={r} idx={i} />)}
               {openSec.has("ing") && <TR label="TOTAL INGRESOS OPERACIONALES" vals={vIng} />}
+
               <SH label="COSTOS DE VENTAS" k="cost" />
               {openSec.has("cost") && costC.map((r, i) => <CR key={r.orden} row={r} idx={i} />)}
               {openSec.has("cost") && <TR label="TOTAL COSTOS" vals={vCost} />}
               <SR label="UTILIDAD BRUTA" vals={vUB} />
+
               <SH label="GASTOS OPERACIONALES" k="gop" />
               {openSec.has("gop") && gopTree && <GasTree n1={gopTree} />}
+              {openSec.has("gop") && <TR label="TOTAL GASTOS OPERACIONALES" vals={vGop} />}
               <SR label="UTILIDAD OPERACIONAL" vals={vUO} />
+
               <SH label="OTROS INGRESOS" k="oi" />
               {openSec.has("oi") && oiC.map((r, i) => <CR key={r.orden} row={r} idx={i} />)}
               {openSec.has("oi") && <TR label="TOTAL OTROS INGRESOS" vals={vOI} />}
+
               <SH label="OTROS GASTOS" k="og" />
               {openSec.has("og") && gnopTree && <GasTree n1={gnopTree} />}
+              {openSec.has("og") && <TR label="TOTAL OTROS GASTOS" vals={vGnop} />}
               <SR label="UTILIDAD ANTES DE IMPUESTOS" vals={vUAI} />
             </tbody>
           </table>
@@ -1301,12 +1402,10 @@ function TabPorCC({ plan, filtros, onAuditoria }: TabProps) {
 }
 
 // ─────────────────────────────────────────────
-// TAB AUDITORÍA — pestaña 4
+// TAB AUDITORÍA
 // ─────────────────────────────────────────────
 function TabAuditoria({ plan, filtros, ctx }: { plan: PlanQuery; filtros: FiltroDashboard; ctx: AuditoriaCtx | null }) {
   const planRows: PlanPygRow[] = plan.data ?? [];
-
-  // Filtros locales — preseleccionados desde ctx si viene de "Ver detalle →"
   const [ordenSelec, setOrdenSelec] = useState<number | null>(ctx?.orden ?? null);
   const [ccSelec, setCcSelec] = useState<string>(ctx?.ccKey ?? "Todas");
   const [mesSelec, setMesSelec] = useState<number | "Todos">(ctx?.mes ?? "Todos");
@@ -1314,12 +1413,7 @@ function TabAuditoria({ plan, filtros, ctx }: { plan: PlanQuery; filtros: Filtro
   const [pagina, setPagina] = useState(0);
   const POR_PAGINA = 50;
 
-  // Sincronizar cuando llega un nuevo ctx (usuario hace clic en otro "Ver detalle →")
-  const prevCtxRef = { orden: ctx?.orden, cc: ctx?.ccKey, mes: ctx?.mes };
-
-  const cuentasDetalle = planRows.filter(
-    (r) => r.nivel === "Cuenta" && ["4", "5", "6"].includes(String((r as any).clase_cod)),
-  );
+  const cuentasDetalle = planRows.filter((r) => r.nivel === "Cuenta" && ["4", "5", "6"].includes(claseCod(r)));
 
   const auditoria = useEriAuditoria({
     año: filtros.año,
@@ -1341,14 +1435,11 @@ function TabAuditoria({ plan, filtros, ctx }: { plan: PlanQuery; filtros: Filtro
     ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((m) => ({ value: año * 100 + m, label: mesLabel(año * 100 + m) })),
   ];
   const ccOpciones = [{ key: "Todas", label: "Todos los CC" }, ...CC_KEYS];
-
   const ccLabel = (k: string) => CC_KEYS.find((c) => c.key === k)?.label ?? k;
 
   return (
     <div>
-      {/* Filtros */}
       <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-        {/* Cuenta */}
         <div>
           <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Cuenta
@@ -1369,8 +1460,6 @@ function TabAuditoria({ plan, filtros, ctx }: { plan: PlanQuery; filtros: Filtro
             ))}
           </select>
         </div>
-
-        {/* Mes */}
         <div>
           <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Mes
@@ -1390,8 +1479,6 @@ function TabAuditoria({ plan, filtros, ctx }: { plan: PlanQuery; filtros: Filtro
             ))}
           </select>
         </div>
-
-        {/* CC */}
         <div>
           <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Centro de costo
@@ -1411,8 +1498,6 @@ function TabAuditoria({ plan, filtros, ctx }: { plan: PlanQuery; filtros: Filtro
             ))}
           </select>
         </div>
-
-        {/* Buscador */}
         <div>
           <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Buscar tercero / NIT
@@ -1430,7 +1515,6 @@ function TabAuditoria({ plan, filtros, ctx }: { plan: PlanQuery; filtros: Filtro
         </div>
       </div>
 
-      {/* Tabla */}
       {!ordenSelec ? (
         <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
           <div className="mb-2 text-4xl">🔍</div>
@@ -1448,7 +1532,6 @@ function TabAuditoria({ plan, filtros, ctx }: { plan: PlanQuery; filtros: Filtro
         <EmptyState />
       ) : (
         <>
-          {/* Info */}
           <div className="mb-2 flex items-center justify-between text-[11px] text-muted-foreground">
             <span>{rows.length.toLocaleString()} registros encontrados</span>
             <span>
@@ -1460,7 +1543,6 @@ function TabAuditoria({ plan, filtros, ctx }: { plan: PlanQuery; filtros: Filtro
               </span>
             </span>
           </div>
-
           <div className="overflow-auto rounded-lg border border-border">
             <table className="w-full border-collapse text-[11px]">
               <thead className="sticky top-0 z-10 bg-card">
@@ -1504,7 +1586,6 @@ function TabAuditoria({ plan, filtros, ctx }: { plan: PlanQuery; filtros: Filtro
                   );
                 })}
               </tbody>
-              {/* Total pie */}
               <tfoot>
                 <tr className="border-t border-border bg-card">
                   <td colSpan={4} className="px-3 py-2 text-[11px] font-bold text-muted-foreground">
@@ -1519,8 +1600,6 @@ function TabAuditoria({ plan, filtros, ctx }: { plan: PlanQuery; filtros: Filtro
               </tfoot>
             </table>
           </div>
-
-          {/* Paginación */}
           {totalPaginas > 1 && (
             <div className="mt-3 flex items-center justify-center gap-2">
               <button
