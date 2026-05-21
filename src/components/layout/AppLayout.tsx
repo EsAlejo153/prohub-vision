@@ -1,6 +1,7 @@
 import { ReactNode } from "react";
 import Sidebar from "./Sidebar";
 import TopBar from "./TopBar";
+import AlertaCuentasSinPlan from "@/components/AlertaCuentasSinPlan";
 
 export default function AppLayout({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -10,6 +11,7 @@ export default function AppLayout({ title, children }: { title: string; children
       <main className="ml-[180px] pt-14">
         <div className="p-6">{children}</div>
       </main>
+      <AlertaCuentasSinPlan />
     </div>
   );
 }
