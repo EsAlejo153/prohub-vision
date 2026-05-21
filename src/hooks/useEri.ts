@@ -13,18 +13,6 @@ export interface PlanPygRow {
   grupo_cod?: string | null;
 }
 
-export interface EriValueRow {
-  orden: number;
-  concepto: string;
-  nivel: string;
-  grupo_titulo: string;
-  etiqueta_fila: string;
-  año_mes_num: number;
-  compania: string;
-  cc_key: string;
-  valor_pyg: number;
-}
-
 export interface EriResumidaRow {
   orden: number;
   concepto: string;
@@ -38,6 +26,9 @@ export interface EriResumidaRow {
   cc_key: string;
   valor_pyg: number;
 }
+
+// Alias para compatibilidad
+export type EriValueRow = EriResumidaRow;
 
 export interface EriDetalleRow {
   orden: number;
@@ -64,6 +55,7 @@ export interface GastoTerceroRow {
   gasto_real: number;
 }
 
+// ─── plan_pyg ─────────────────────────────────────────────────────────────────
 export function usePlanPyg() {
   return useQuery({
     queryKey: ["plan_pyg"],
@@ -79,8 +71,10 @@ export function usePlanPyg() {
   });
 }
 
-// ─── Hook principal: Tab Período ───────────────────────────────────────────
-// Lee SOLO v_eri_resumida, sin mezclar v_gastos_por_tercero
+// ─── FUENTE ÚNICA: v_eri_resumida ─────────────────────────────────────────────
+// Todas las tabs del ERI leen desde aquí. Nunca mezclar con v_gastos_por_tercero
+// para calcular subtotales — eso causaba la inconsistencia entre tabs.
+
 export function useEri(filtros: FiltroDashboard) {
   return useQuery({
     queryKey: ["eri", filtros],
@@ -97,8 +91,6 @@ export function useEri(filtros: FiltroDashboard) {
   });
 }
 
-// ─── Hook mes a mes: Tab Mes a Mes ─────────────────────────────────────────
-// Lee SOLO v_eri_resumida para todas las clases (4, 5, 6)
 export function useEriAllMonths(filtros: { año: number | "Todas"; compania: string; ccKey: string }) {
   return useQuery({
     queryKey: ["eri-all-months", filtros],
@@ -119,8 +111,6 @@ export function useEriAllMonths(filtros: { año: number | "Todas"; compania: str
   });
 }
 
-// ─── Hook por CC: Tab Por Centro de Costo ──────────────────────────────────
-// Lee SOLO v_eri_resumida para todas las clases (4, 5, 6)
 export function useEriAllCC(filtros: { año: number | "Todas"; compania: string; mes: number | "Todos" }) {
   return useQuery({
     queryKey: ["eri-all-cc", filtros],
@@ -141,7 +131,7 @@ export function useEriAllCC(filtros: { año: number | "Todas"; compania: string;
   });
 }
 
-// ─── Conteo de terceros únicos por orden ───────────────────────────────────
+// ─── Conteo de terceros ────────────────────────────────────────────────────────
 export function useEriTerceroCount(filtros: { año: number | "Todas"; compania: string; mes: number | "Todos" }) {
   return useQuery({
     queryKey: ["eri-tercero-count", filtros],
@@ -168,7 +158,7 @@ export function useEriTerceroCount(filtros: { año: number | "Todas"; compania: 
   });
 }
 
-// ─── Detalle inline de terceros ────────────────────────────────────────────
+// ─── Detalle inline ────────────────────────────────────────────────────────────
 export function useEriDetalle(filtros: {
   año: number | "Todas";
   compania: string;
@@ -194,7 +184,7 @@ export function useEriDetalle(filtros: {
   });
 }
 
-// ─── Auditoría detallada ───────────────────────────────────────────────────
+// ─── Auditoría ─────────────────────────────────────────────────────────────────
 export function useEriAuditoria(filtros: {
   año: number | "Todas";
   compania: string;
@@ -230,8 +220,8 @@ export function useEriAuditoria(filtros: {
   });
 }
 
-// ─── Gastos por tercero: SOLO usado por TabPorCC (árbol de gastos) ─────────
-// Se mantiene para el árbol expandible de gastos en TabPorCC
+// ─── Gastos por tercero: SOLO para árbol expandible en TabPorCC ───────────────
+// NO usar para calcular subtotales — usar v_eri_resumida para eso
 export function useGastosTercero(filtros: {
   año: number | "Todas";
   mes: number | "Todos";
@@ -255,7 +245,6 @@ export function useGastosTercero(filtros: {
   });
 }
 
-// ─── Gastos por CC: SOLO para árbol expandible en TabPorCC ────────────────
 export function useGastosPorCC(filtros: { año: number | "Todas"; mes: number | "Todos"; compania: string }) {
   return useQuery({
     queryKey: ["gastos-por-cc", filtros],
