@@ -79,22 +79,26 @@ export function usePlanPyg() {
   });
 }
 
+// ─── Hook principal: Tab Período ───────────────────────────────────────────
+// Lee SOLO v_eri_resumida, sin mezclar v_gastos_por_tercero
 export function useEri(filtros: FiltroDashboard) {
   return useQuery({
     queryKey: ["eri", filtros],
-    queryFn: async (): Promise<EriValueRow[]> => {
+    queryFn: async (): Promise<EriResumidaRow[]> => {
       let q = supabase.from("v_eri_resumida").select("*");
       const range = buildPeriodoRange(filtros.año, filtros.mes);
       if (range) q = q.gte("año_mes_num", range.min).lte("año_mes_num", range.max);
       if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
       if (filtros.ccKey !== "Todas") q = q.eq("cc_key", filtros.ccKey);
-      const { data, error } = await q.limit(2000);
+      const { data, error } = await q.limit(5000);
       if (error) throw error;
-      return (data ?? []) as EriValueRow[];
+      return (data ?? []) as EriResumidaRow[];
     },
   });
 }
 
+// ─── Hook mes a mes: Tab Mes a Mes ─────────────────────────────────────────
+// Lee SOLO v_eri_resumida para todas las clases (4, 5, 6)
 export function useEriAllMonths(filtros: { año: number | "Todas"; compania: string; ccKey: string }) {
   return useQuery({
     queryKey: ["eri-all-months", filtros],
@@ -108,13 +112,15 @@ export function useEriAllMonths(filtros: { año: number | "Todas"; compania: str
       const { data, error } = await q
         .order("orden", { ascending: true })
         .order("año_mes_num", { ascending: true })
-        .limit(2000);
+        .limit(5000);
       if (error) throw error;
       return (data ?? []) as EriResumidaRow[];
     },
   });
 }
 
+// ─── Hook por CC: Tab Por Centro de Costo ──────────────────────────────────
+// Lee SOLO v_eri_resumida para todas las clases (4, 5, 6)
 export function useEriAllCC(filtros: { año: number | "Todas"; compania: string; mes: number | "Todos" }) {
   return useQuery({
     queryKey: ["eri-all-cc", filtros],
@@ -128,14 +134,14 @@ export function useEriAllCC(filtros: { año: number | "Todas"; compania: string;
       const { data, error } = await q
         .order("orden", { ascending: true })
         .order("cc_key", { ascending: true })
-        .limit(2000);
+        .limit(5000);
       if (error) throw error;
       return (data ?? []) as EriResumidaRow[];
     },
   });
 }
 
-// Conteo de terceros únicos por orden — decide si inline o botón
+// ─── Conteo de terceros únicos por orden ───────────────────────────────────
 export function useEriTerceroCount(filtros: { año: number | "Todas"; compania: string; mes: number | "Todos" }) {
   return useQuery({
     queryKey: ["eri-tercero-count", filtros],
@@ -148,7 +154,6 @@ export function useEriTerceroCount(filtros: { año: number | "Todas"; compania: 
       if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
       const { data, error } = await q.limit(10000);
       if (error) throw error;
-      // Contar combinaciones únicas tercero+cc por orden
       const counts: Record<number, Set<string>> = {};
       for (const r of (data ?? []) as any[]) {
         if (!counts[r.orden]) counts[r.orden] = new Set();
@@ -163,8 +168,7 @@ export function useEriTerceroCount(filtros: { año: number | "Todas"; compania: 
   });
 }
 
-// Detalle de terceros para drill-down inline (solo cuentas con ≤ 20 terceros)
-// Agrupa por tercero+cc+mes para mostrar el detalle completo
+// ─── Detalle inline de terceros ────────────────────────────────────────────
 export function useEriDetalle(filtros: {
   año: number | "Todas";
   compania: string;
@@ -190,7 +194,7 @@ export function useEriDetalle(filtros: {
   });
 }
 
-// Auditoría: detalle completo de una cuenta con paginación
+// ─── Auditoría detallada ───────────────────────────────────────────────────
 export function useEriAuditoria(filtros: {
   año: number | "Todas";
   compania: string;
@@ -214,20 +218,20 @@ export function useEriAuditoria(filtros: {
       const { data, error } = await q.limit(5000);
       if (error) throw error;
       let rows = (data ?? []) as unknown as EriDetalleRow[];
-      // Filtro de búsqueda en frontend
       if (filtros.search.trim()) {
         const term = filtros.search.toLowerCase();
         rows = rows.filter(
           (r) => r.nombre_tercero?.toLowerCase().includes(term) || r.tercero_key?.toLowerCase().includes(term),
         );
       }
-      // Ordenar mayor a menor por valor absoluto
       rows.sort((a, b) => Math.abs(Number(b.valor_pyg)) - Math.abs(Number(a.valor_pyg)));
       return rows;
     },
   });
 }
 
+// ─── Gastos por tercero: SOLO usado por TabPorCC (árbol de gastos) ─────────
+// Se mantiene para el árbol expandible de gastos en TabPorCC
 export function useGastosTercero(filtros: {
   año: number | "Todas";
   mes: number | "Todos";
@@ -237,7 +241,7 @@ export function useGastosTercero(filtros: {
   return useQuery({
     queryKey: ["gastos-tercero", filtros],
     queryFn: async (): Promise<GastoTerceroRow[]> => {
-      let q = supabase.from("v_gastos_por_tercero").select("*");
+      let q = supabase.from("v_gastos_por_tercero").select("*").like("cuenta_key", "5%");
       if (filtros.año !== "Todas") {
         q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
       }
@@ -251,11 +255,12 @@ export function useGastosTercero(filtros: {
   });
 }
 
+// ─── Gastos por CC: SOLO para árbol expandible en TabPorCC ────────────────
 export function useGastosPorCC(filtros: { año: number | "Todas"; mes: number | "Todos"; compania: string }) {
   return useQuery({
     queryKey: ["gastos-por-cc", filtros],
     queryFn: async (): Promise<GastoTerceroRow[]> => {
-      let q = supabase.from("v_gastos_por_tercero").select("*");
+      let q = supabase.from("v_gastos_por_tercero").select("*").like("cuenta_key", "5%");
       if (filtros.año !== "Todas") {
         q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
       }
