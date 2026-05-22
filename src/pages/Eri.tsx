@@ -877,7 +877,7 @@ function buildTree(rows: GastoTerceroRow[]): N1[] {
   for (const r of rows) {
     const key = `${r.tipo_gasto}||${r.detalle_gasto}||${r.nombre_cuenta}||${r.tercero_nombre}||${r.nit}`;
     if (!map.has(key)) map.set(key, new Map());
-    map.get(key)!.set(r.cc_key, (map.get(key)!.get(r.cc_key) ?? 0) + (Number(r.gasto_real) || 0));
+    map.get(key)!.set(r.cc_key, (map.get(key)!.get(r.cc_key) ?? 0) + (Number(r.gasto_real) || 0) * -1);
   }
   const n1Map = new Map<string, N1>();
   for (const [key, ccMap] of map.entries()) {
