@@ -48,7 +48,7 @@ const CC_KEYS = [
 ];
 const CENTROS = [{ key: "TODOS", label: "Consolidado" }, ...CC_KEYS];
 
-type TabId = "periodo" | "mes-a-mes" | "por-cc" | "auditoria";
+type TabId = "por-cc" | "mes-a-mes" | "auditoria";
 
 interface AuditoriaCtx {
   orden: number;
@@ -196,7 +196,7 @@ function calcSubtotalesPorCC(
 export default function Eri() {
   const filtros = useFiltros();
   const plan = usePlanPyg();
-  const [activeTab, setActiveTab] = useState<TabId>("periodo");
+  const [activeTab, setActiveTab] = useState<TabId>("por-cc");
   const [audCtx, setAudCtx] = useState<AuditoriaCtx | null>(null);
 
   const goToAuditoria = (ctx: AuditoriaCtx) => {
@@ -205,9 +205,8 @@ export default function Eri() {
   };
 
   const tabs: { id: TabId; label: string }[] = [
-    { id: "periodo", label: "Período" },
-    { id: "mes-a-mes", label: "Mes a mes" },
     { id: "por-cc", label: "Por centro de costo" },
+    { id: "mes-a-mes", label: "Mes a mes" },
     { id: "auditoria", label: "Auditoría" },
   ];
 
@@ -228,7 +227,6 @@ export default function Eri() {
           </button>
         ))}
       </div>
-      {activeTab === "periodo" && <TabPeriodo plan={plan} filtros={filtros} onAuditoria={goToAuditoria} />}
       {activeTab === "mes-a-mes" && <TabMesAMes plan={plan} filtros={filtros} onAuditoria={goToAuditoria} />}
       {activeTab === "por-cc" && <TabPorCC plan={plan} filtros={filtros} onAuditoria={goToAuditoria} />}
       {activeTab === "auditoria" && <TabAuditoria plan={plan} filtros={filtros} ctx={audCtx} />}
@@ -381,214 +379,6 @@ function DetalleInline({
         );
       })}
     </>
-  );
-}
-
-// ─────────────────────────────────────────────
-// TAB PERÍODO
-// ─────────────────────────────────────────────
-function TabPeriodo({ plan, filtros, onAuditoria }: TabProps) {
-  const [ccActivo, setCcActivo] = useState("TODOS");
-  const [openRows, setOpenRows] = useState<Set<number>>(new Set());
-  const eri = useEri({ ...filtros, ccKey: ccActivo === "TODOS" ? "Todas" : ccActivo });
-
-  const mesActivo = filtros.mes as number | "Todos";
-
-  const terceroCount = useEriTerceroCount({
-    año: filtros.año,
-    compania: filtros.compania,
-    mes: mesActivo,
-  });
-
-  const { planRows, valueMap, subtotales } = useMemo(() => {
-    const planRows: PlanPygRow[] = plan.data ?? [];
-    const map = new Map<number, number>();
-    for (const r of eri.data ?? []) {
-      map.set(r.orden, (map.get(r.orden) ?? 0) + (Number(r.valor_pyg) || 0));
-    }
-    const subtotales = calcSubtotales(planRows, map);
-    return { planRows, valueMap: map, subtotales };
-  }, [plan.data, eri.data]);
-
-  const ingresosTotales = Math.abs(subtotales.ing) || 1;
-  const isLoading = plan.isLoading || eri.isLoading;
-  const isError = plan.isError || eri.isError;
-  const ccLabel = CENTROS.find((c) => c.key === ccActivo)?.label;
-  const periodoLabel =
-    filtros.año === "Todas"
-      ? "Acumulado total"
-      : filtros.mes === "Todos"
-        ? `Acumulado ${filtros.año}`
-        : mesLabel((filtros.año as number) * 100 + (filtros.mes as number));
-
-  const toggleRow = (orden: number) =>
-    setOpenRows((p) => {
-      const s = new Set(p);
-      s.has(orden) ? s.delete(orden) : s.add(orden);
-      return s;
-    });
-
-  const esCuentaDetalle = (row: PlanPygRow) => row.nivel === "Cuenta" && ["4", "5", "6"].includes(claseCod(row));
-
-  // Filas sintéticas de subtotales para inyectar en la tabla
-  const subtotalRows = [
-    { key: "ub", label: "UTILIDAD BRUTA", value: subtotales.ub },
-    { key: "uo", label: "UTILIDAD OPERACIONAL", value: subtotales.uo },
-    { key: "uai", label: "UTILIDAD ANTES DE IMPUESTOS", value: subtotales.uai },
-  ];
-
-  return (
-    <div>
-      <CcPills value={ccActivo} onChange={setCcActivo} />
-      <p className="mb-3 text-xs text-muted-foreground">
-        {periodoLabel} · {ccLabel}
-      </p>
-      {isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 12 }).map((_, i) => (
-            <LoadingSkeleton key={i} className="h-7 w-full" />
-          ))}
-        </div>
-      ) : isError ? (
-        <ErrorState />
-      ) : planRows.length === 0 ? (
-        <EmptyState />
-      ) : (
-        <div className="overflow-auto rounded-lg border border-border">
-          <table className="w-full border-collapse text-[11px]">
-            <thead className="sticky top-0 z-10 bg-card">
-              <tr className="border-b border-border">
-                <th className="w-[55%] px-3 py-2 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Concepto
-                </th>
-                <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  Valor
-                </th>
-                <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  % Ingr.
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {planRows.map((row) => {
-                const val = valueMap.get(row.orden) ?? 0;
-                const pct = row.nivel !== "Titulo" ? (val / ingresosTotales) * 100 : null;
-                const f = fmtCell(val);
-                const isTitulo = row.nivel === "Titulo";
-                const isTotal = row.nivel === "Total";
-                const isSubtotal = row.nivel === "Subtotal";
-                const bold = isTitulo || isTotal || isSubtotal;
-                const bg = isTitulo
-                  ? "#1e2d42"
-                  : isTotal
-                    ? val >= 0
-                      ? "#1a2d1a"
-                      : "#2d1a1a"
-                    : isSubtotal
-                      ? "#0d2040"
-                      : undefined;
-
-                // Inyectar filas de subtotal calculado justo antes del título correspondiente
-                const subtotalAntes = (() => {
-                  if (row.nivel === "Titulo" && claseCod(row) === "5" && grupoCod(row) === "51") {
-                    return subtotalRows.find((s) => s.key === "ub");
-                  }
-                  if (row.nivel === "Titulo" && claseCod(row) === "4" && grupoCod(row) === "42") {
-                    return subtotalRows.find((s) => s.key === "uo");
-                  }
-                  if (row.nivel === "Subtotal") {
-                    return subtotalRows.find((s) => s.key === "uai");
-                  }
-                  return null;
-                })();
-
-                const esDetalle = esCuentaDetalle(row);
-                const count = terceroCount.data?.[row.orden] ?? 0;
-                const isOpen = openRows.has(row.orden);
-
-                return (
-                  <Fragment key={row.orden}>
-                    {/* Fila de subtotal calculado inyectada antes si corresponde */}
-                    {subtotalAntes && (
-                      <tr
-                        className="border-b border-border border-l-2 border-l-primary"
-                        style={{ background: "#0d2040", fontWeight: 700 }}
-                      >
-                        <td className="px-3 py-2 text-[12px] font-bold text-foreground">{subtotalAntes.label}</td>
-                        <td
-                          className={`whitespace-nowrap px-3 py-1.5 text-right font-bold tabular-nums ${subtotalAntes.value < 0 ? "text-destructive" : subtotalAntes.value === 0 ? "text-muted-foreground" : "text-primary"}`}
-                        >
-                          {fmtCell(subtotalAntes.value).text}
-                        </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-                          {ingresosTotales ? `${((subtotalAntes.value / ingresosTotales) * 100).toFixed(2)}%` : ""}
-                        </td>
-                      </tr>
-                    )}
-                    {/* Ocultar la fila Subtotal original del plan_pyg (ya la reemplazamos) */}
-                    {row.nivel !== "Subtotal" && (
-                      <tr
-                        className="border-b border-border/40"
-                        style={{ background: bg, fontWeight: bold ? 700 : 400 }}
-                      >
-                        <td className="px-3 py-1.5 text-foreground">
-                          <div className="flex items-center gap-2">
-                            {esDetalle && count > 0 && count <= UMBRAL_TERCEROS && (
-                              <button
-                                onClick={() => toggleRow(row.orden)}
-                                className="text-[9px] text-muted-foreground/60 hover:text-primary transition-colors"
-                              >
-                                {isOpen ? "▾" : "▸"}
-                              </button>
-                            )}
-                            <span>{row.etiqueta_fila || row.concepto}</span>
-                            {esDetalle && count > UMBRAL_TERCEROS && (
-                              <button
-                                onClick={() =>
-                                  onAuditoria({
-                                    orden: row.orden,
-                                    concepto: row.etiqueta_fila || row.concepto,
-                                    ccKey: ccActivo === "TODOS" ? "Todas" : ccActivo,
-                                    mes: mesActivo,
-                                  })
-                                }
-                                className="ml-auto text-[9px] text-primary/70 hover:text-primary border border-primary/30 rounded px-1.5 py-0.5 transition-colors"
-                              >
-                                Ver detalle →
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                        {isTitulo ? (
-                          <>
-                            <td />
-                            <td />
-                          </>
-                        ) : (
-                          <>
-                            <td
-                              className={`whitespace-nowrap px-3 py-1.5 text-right tabular-nums ${f.neg ? "text-destructive" : f.zero ? "text-muted-foreground" : "text-foreground"}`}
-                            >
-                              {f.text}
-                            </td>
-                            <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
-                              {pct != null ? `${pct.toFixed(2)}%` : ""}
-                            </td>
-                          </>
-                        )}
-                      </tr>
-                    )}
-                    {isOpen && esDetalle && count <= UMBRAL_TERCEROS && (
-                      <DetalleInline orden={row.orden} filtros={filtros} showMonths={false} mes={mesActivo} />
-                    )}
-                  </Fragment>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
   );
 }
 
