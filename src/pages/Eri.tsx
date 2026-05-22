@@ -383,10 +383,6 @@ function DetalleInline({
 }
 
 // ─────────────────────────────────────────────
-// TAB PERÍODO
-// ─────────────────────────────────────────────
-function TabPeriodo({ plan, filtros, onAuditoria }: TabProps) {
-  const [ccActivo, setCcActivo] = useState("TODOS");
 // TAB MES A MES
 // ─────────────────────────────────────────────
 function TabMesAMes({ plan, filtros, onAuditoria }: TabProps) {
