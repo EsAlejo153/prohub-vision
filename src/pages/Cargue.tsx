@@ -33,6 +33,7 @@ export default function Cargue() {
   const [insertError, setInsertError] = useState<string | null>(null);
   const [showDuplicadosConfirm, setShowDuplicadosConfirm] = useState(false);
   const [progressMsg, setProgressMsg] = useState("");
+  const [tercerosSincronizados, setTercerosSincronizados] = useState(0);
 
   const stats = useMemo(() => {
     const total = rows.length;
@@ -119,12 +120,7 @@ export default function Cargue() {
       let skipped = 0;
 
       if (!forzarDuplicados) {
-        // ── Detección eficiente de duplicados en batch ──────────────────────
-        // Agrupamos por fecha_key+compania y hacemos una sola query por grupo
-        // Esto reduce miles de queries a unas pocas decenas
         const existingKeys = new Set<string>();
-
-        // Agrupar filas por compania+fecha_key para hacer queries eficientes
         const grupos = new Map<string, typeof allRows>();
         for (const r of allRows) {
           const gKey = `${r.compania}||${r.fecha_key}`;
@@ -139,14 +135,12 @@ export default function Cargue() {
           const [compania, fecha_key] = gKey.split("||");
           setProgressMsg(`Verificando duplicados… (${++gruposProcesados}/${totalGrupos} fechas)`);
 
-          // Traer todos los registros de esa compania+fecha de la BD
           const { data: bdRows } = await supabase
             .from("movimientos")
             .select("cuenta_key, fecha_key, cc_key, comprobante, debito, credito, concepto, compania")
             .eq("compania", compania ?? "")
             .eq("fecha_key", fecha_key ?? "");
 
-          // Construir set de claves existentes en BD para este grupo
           for (const bd of bdRows ?? []) {
             existingKeys.add(rowKey(bd as any));
           }
@@ -154,7 +148,6 @@ export default function Cargue() {
 
         rowsToInsert = allRows.filter((r) => !existingKeys.has(rowKey(r)));
         skipped = allRows.length - rowsToInsert.length;
-        // ───────────────────────────────────────────────────────────────────
       }
 
       setProgressMsg(`Insertando ${rowsToInsert.length.toLocaleString("es-CO")} registros…`);
@@ -170,7 +163,6 @@ export default function Cargue() {
         );
         try {
           const { data, error } = await supabase.from("movimientos").insert(chunk).select("id");
-
           if (error) {
             failed.push({ batchStart: i, error: error.message });
           } else {
@@ -196,6 +188,46 @@ export default function Cargue() {
         toast.warning(`${inserted} importados, ${failed.length} lote(s) fallaron: ${failed[0].error}`);
       }
 
+      // ── SINCRONIZACIÓN AUTOMÁTICA DE TERCEROS ──────────────────────────────
+      // Extrae todos los pares nit+nombre únicos de las filas insertadas
+      // y hace upsert en dim_terceros para que aparezcan los nombres en auditoría
+      try {
+        setProgressMsg("Sincronizando terceros…");
+        const terceroMap = new Map<string, string>();
+        for (const r of rowsToInsert) {
+          const nit = (r as any).tercero_key;
+          const nombre = (r as any).nombre_tercero;
+          if (
+            nit &&
+            nombre &&
+            String(nit).trim() !== "" &&
+            String(nit).trim() !== "SIN TERCERO" &&
+            String(nombre).trim() !== ""
+          ) {
+            terceroMap.set(String(nit).trim(), String(nombre).trim());
+          }
+        }
+
+        if (terceroMap.size > 0) {
+          const terceroRows = Array.from(terceroMap.entries()).map(([nit, nombre]) => ({
+            nit,
+            nombre,
+          }));
+
+          // Insertar en lotes de 200
+          const T_BATCH = 200;
+          for (let i = 0; i < terceroRows.length; i += T_BATCH) {
+            const chunk = terceroRows.slice(i, i + T_BATCH);
+            await supabase.from("dim_terceros").upsert(chunk, { onConflict: "nit", ignoreDuplicates: false });
+          }
+          setTercerosSincronizados(terceroMap.size);
+        }
+      } catch (terceroErr) {
+        // No bloquear el flujo si falla la sincronización de terceros
+        console.warn("Error sincronizando terceros:", terceroErr);
+      }
+      // ───────────────────────────────────────────────────────────────────────
+
       setStep("success");
     } catch (err: any) {
       setInsertError(`Error inesperado: ${err?.message ?? String(err)}`);
@@ -208,6 +240,7 @@ export default function Cargue() {
     setRows([]);
     setInsertedCount(0);
     setSkippedCount(0);
+    setTercerosSincronizados(0);
     setInsertError(null);
     setShowDuplicadosConfirm(false);
     setProgressMsg("");
@@ -331,8 +364,7 @@ export default function Cargue() {
                   <p className="text-xs text-muted-foreground mt-1">
                     Se insertarán{" "}
                     <strong className="text-amber-400">todas las {stats.valid.toLocaleString("es-CO")} filas</strong>{" "}
-                    del archivo, incluyendo las que ya existen en la base de datos y las que son idénticas entre sí.
-                    Esta acción no se puede deshacer.
+                    del archivo, incluyendo las que ya existen en la base de datos. Esta acción no se puede deshacer.
                   </p>
                 </div>
               </div>
@@ -391,7 +423,7 @@ export default function Cargue() {
         <div className="mt-6 flex flex-col items-center justify-center rounded-lg border border-success/30 bg-success/5 p-12 text-center">
           <CheckCircle2 className="h-16 w-16 text-success" />
           <h2 className="mt-4 text-2xl font-bold text-foreground">¡Importación exitosa!</h2>
-          <div className="mt-4 grid w-full max-w-md grid-cols-1 gap-2 sm:grid-cols-3">
+          <div className="mt-4 grid w-full max-w-md grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-md border border-success/30 bg-success/10 p-3">
               <div className="text-[11px] font-semibold uppercase tracking-wider text-success">Insertados</div>
               <div className="mt-1 text-xl font-bold text-success tabular-nums">
@@ -410,6 +442,14 @@ export default function Cargue() {
               <div className="text-[11px] font-semibold uppercase tracking-wider text-destructive">Con errores</div>
               <div className="mt-1 text-xl font-bold text-destructive tabular-nums">
                 {stats.invalid.toLocaleString("es-CO")}
+              </div>
+            </div>
+            <div className="rounded-md border border-primary/30 bg-primary/10 p-3">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-primary">
+                Terceros sincronizados
+              </div>
+              <div className="mt-1 text-xl font-bold text-primary tabular-nums">
+                {tercerosSincronizados.toLocaleString("es-CO")}
               </div>
             </div>
           </div>
