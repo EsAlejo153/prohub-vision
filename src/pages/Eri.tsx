@@ -48,7 +48,7 @@ const CC_KEYS = [
 ];
 const CENTROS = [{ key: "TODOS", label: "Consolidado" }, ...CC_KEYS];
 
-type TabId = "periodo" | "mes-a-mes" | "por-cc" | "auditoria";
+type TabId = "por-cc" | "mes-a-mes" | "auditoria";
 
 interface AuditoriaCtx {
   orden: number;
@@ -196,7 +196,7 @@ function calcSubtotalesPorCC(
 export default function Eri() {
   const filtros = useFiltros();
   const plan = usePlanPyg();
-  const [activeTab, setActiveTab] = useState<TabId>("periodo");
+  const [activeTab, setActiveTab] = useState<TabId>("por-cc");
   const [audCtx, setAudCtx] = useState<AuditoriaCtx | null>(null);
 
   const goToAuditoria = (ctx: AuditoriaCtx) => {
@@ -205,9 +205,8 @@ export default function Eri() {
   };
 
   const tabs: { id: TabId; label: string }[] = [
-    { id: "periodo", label: "Período" },
-    { id: "mes-a-mes", label: "Mes a mes" },
     { id: "por-cc", label: "Por centro de costo" },
+    { id: "mes-a-mes", label: "Mes a mes" },
     { id: "auditoria", label: "Auditoría" },
   ];
 
@@ -228,7 +227,6 @@ export default function Eri() {
           </button>
         ))}
       </div>
-      {activeTab === "periodo" && <TabPeriodo plan={plan} filtros={filtros} onAuditoria={goToAuditoria} />}
       {activeTab === "mes-a-mes" && <TabMesAMes plan={plan} filtros={filtros} onAuditoria={goToAuditoria} />}
       {activeTab === "por-cc" && <TabPorCC plan={plan} filtros={filtros} onAuditoria={goToAuditoria} />}
       {activeTab === "auditoria" && <TabAuditoria plan={plan} filtros={filtros} ctx={audCtx} />}
