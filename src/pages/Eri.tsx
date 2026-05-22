@@ -186,8 +186,8 @@ function calcSubtotalesPorCC(
   const vUAI: VCC = {};
   for (const cc of CC_KEYS) {
     vUB[cc.key] = (vIng[cc.key] ?? 0) + (vCost[cc.key] ?? 0);
-    vUO[cc.key] = vUB[cc.key] - (vGop[cc.key] ?? 0);
-    vUAI[cc.key] = vUO[cc.key] + (vOI[cc.key] ?? 0) - (vGnop[cc.key] ?? 0);
+    vUO[cc.key] = vUB[cc.key] + (vGop[cc.key] ?? 0);
+    vUAI[cc.key] = vUO[cc.key] + (vOI[cc.key] ?? 0) + (vGnop[cc.key] ?? 0);
   }
 
   return { vIng, vCost, vUB, vGop, vUO, vOI, vGnop, vUAI, ingC, costC, gastOpC, gastNoOpC, oiC };
