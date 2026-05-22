@@ -106,10 +106,10 @@ function calcSubtotalesPorMes(planRows: PlanPygRow[], valueMap: Map<number, Map<
   const costMes = months.map((m) => sumOrdenMes(costC, m));
   const ubMes = months.map((_, i) => ingMes[i] + costMes[i]);
   const gopMes = months.map((m) => sumOrdenMes(gastOpC, m));
-  const uoMes = months.map((_, i) => ubMes[i] - gopMes[i]);
+  const uoMes = months.map((_, i) => ubMes[i] + gopMes[i]);
   const oiMes = months.map((m) => sumOrdenMes(oiC, m));
   const gnopMes = months.map((m) => sumOrdenMes(gastNoOpC, m));
-  const uaiMes = months.map((_, i) => uoMes[i] + oiMes[i] - gnopMes[i]);
+  const uaiMes = months.map((_, i) => uoMes[i] + oiMes[i] + gnopMes[i]);
 
   const sum = (a: number[]) => a.reduce((s, v) => s + v, 0);
 
