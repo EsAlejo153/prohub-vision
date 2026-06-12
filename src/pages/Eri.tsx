@@ -1436,7 +1436,7 @@ function TabAuditoria({ plan, filtros, ctx }: { plan: PlanQuery; filtros: Filtro
             <option value="">-- Selecciona una cuenta --</option>
             {cuentasDetalle.map((r) => (
               <option key={r.orden} value={r.orden}>
-                {r.etiqueta_fila || r.concepto}
+                {r.cuenta_key ? `${r.cuenta_key} · ${r.concepto}` : r.etiqueta_fila || r.concepto}
               </option>
             ))}
           </select>
