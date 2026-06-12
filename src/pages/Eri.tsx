@@ -34,7 +34,6 @@ function fmtCell(v: number | null | undefined): { text: string; neg: boolean; ze
   return { text: v.toLocaleString("es-CO", { maximumFractionDigits: 0 }), neg: false, zero: false };
 }
 
-// Helper para normalizar clase_cod y grupo_cod siempre como string limpio
 const claseCod = (r: PlanPygRow) => String((r as any).clase_cod ?? "").trim();
 const grupoCod = (r: PlanPygRow) => String((r as any).grupo_cod ?? "").trim();
 
@@ -57,22 +56,13 @@ interface AuditoriaCtx {
   mes: number | "Todos";
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// LÓGICA CENTRAL COMPARTIDA: calcula subtotales desde v_eri_resumida
-// Esta función es la fuente única de verdad para las tres tabs
-// ─────────────────────────────────────────────────────────────────────────────
 function calcSubtotales(planRows: PlanPygRow[], valueMap: Map<number, number>) {
-  // Ingresos operacionales (clase 4, grupo 41)
   const ingC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "4" && grupoCod(r) === "41");
-  // Costos (clase 6)
   const costC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "6");
-  // Gastos operacionales (clase 5, grupos 51 y 52)
   const gastOpC = planRows.filter(
     (r) => r.nivel === "Cuenta" && claseCod(r) === "5" && ["51", "52"].includes(grupoCod(r)),
   );
-  // Gastos no operacionales (clase 5, grupo 53)
   const gastNoOpC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "5" && grupoCod(r) === "53");
-  // Otros ingresos (clase 4, grupo 42)
   const oiC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "4" && grupoCod(r) === "42");
 
   const sumOrden = (rows: PlanPygRow[]) => rows.reduce((s, r) => s + (valueMap.get(r.orden) ?? 0), 0);
@@ -89,7 +79,6 @@ function calcSubtotales(planRows: PlanPygRow[], valueMap: Map<number, number>) {
   return { ing, cost, ub, gop, uo, oi, gnop, uai, ingC, costC, gastOpC, gastNoOpC, oiC };
 }
 
-// Versión por mes para TabMesAMes
 function calcSubtotalesPorMes(planRows: PlanPygRow[], valueMap: Map<number, Map<number, number>>, months: number[]) {
   const ingC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "4" && grupoCod(r) === "41");
   const costC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "6");
@@ -138,25 +127,11 @@ function calcSubtotalesPorMes(planRows: PlanPygRow[], valueMap: Map<number, Map<
   };
 }
 
-// Versión por CC para TabPorCC
-function calcSubtotalesPorCC(
-  planRows: PlanPygRow[],
-  eriMap: Map<number, Map<string, number>>,
-): {
-  vIng: VCC;
-  vCost: VCC;
-  vUB: VCC;
-  vGop: VCC;
-  vUO: VCC;
-  vOI: VCC;
-  vGnop: VCC;
-  vUAI: VCC;
-  ingC: PlanPygRow[];
-  costC: PlanPygRow[];
-  gastOpC: PlanPygRow[];
-  gastNoOpC: PlanPygRow[];
-  oiC: PlanPygRow[];
-} {
+interface VCC {
+  [cc: string]: number;
+}
+
+function calcSubtotalesPorCC(planRows: PlanPygRow[], eriMap: Map<number, Map<string, number>>) {
   const ingC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "4" && grupoCod(r) === "41");
   const costC = planRows.filter((r) => r.nivel === "Cuenta" && claseCod(r) === "6");
   const gastOpC = planRows.filter(
@@ -382,14 +357,90 @@ function DetalleInline({
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TREE TYPES (shared between TabPorCC and TabMesAMes)
+// ─────────────────────────────────────────────────────────────────────────────
+interface N4 {
+  tercero: string;
+  nit: string;
+  valores: VCC;
+}
+interface N3 {
+  nombre_cuenta: string;
+  valores: VCC;
+  terceros: N4[];
+}
+interface N2 {
+  detalle_gasto: string;
+  valores: VCC;
+  cuentas: N3[];
+}
+interface N1 {
+  tipo_gasto: string;
+  valores: VCC;
+  detalles: N2[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// buildTree — generic: key = cc_key OR año_mes_num (as string)
+// ─────────────────────────────────────────────────────────────────────────────
+function buildTree(rows: GastoTerceroRow[], keyFn: (r: GastoTerceroRow) => string): N1[] {
+  const map = new Map<string, Map<string, number>>();
+  for (const r of rows) {
+    const key = `${r.tipo_gasto}||${r.detalle_gasto}||${r.nombre_cuenta}||${r.tercero_nombre}||${r.nit}`;
+    if (!map.has(key)) map.set(key, new Map());
+    const dimKey = keyFn(r);
+    map.get(key)!.set(dimKey, (map.get(key)!.get(dimKey) ?? 0) + (Number(r.gasto_real) || 0) * -1);
+  }
+  const n1Map = new Map<string, N1>();
+  for (const [key, dimMap] of map.entries()) {
+    const [tipo, det, nom, terc, nit] = key.split("||");
+    const vals: VCC = {};
+    for (const [k, v] of dimMap.entries()) vals[k] = v;
+    if (!n1Map.has(tipo)) n1Map.set(tipo, { tipo_gasto: tipo, valores: {}, detalles: [] });
+    const n1 = n1Map.get(tipo)!;
+    for (const [k, v] of Object.entries(vals)) n1.valores[k] = (n1.valores[k] ?? 0) + v;
+    let n2 = n1.detalles.find((d) => d.detalle_gasto === det);
+    if (!n2) {
+      n2 = { detalle_gasto: det, valores: {}, cuentas: [] };
+      n1.detalles.push(n2);
+    }
+    for (const [k, v] of Object.entries(vals)) n2.valores[k] = (n2.valores[k] ?? 0) + v;
+    let n3 = n2.cuentas.find((c) => c.nombre_cuenta === nom);
+    if (!n3) {
+      n3 = { nombre_cuenta: nom, valores: {}, terceros: [] };
+      n2.cuentas.push(n3);
+    }
+    for (const [k, v] of Object.entries(vals)) n3.valores[k] = (n3.valores[k] ?? 0) + v;
+    n3.terceros.push({ tercero: terc?.replace(/\d+$/, "").trim() || "Sin identificar", nit, valores: vals });
+  }
+  return Array.from(n1Map.values())
+    .sort((a, b) => a.tipo_gasto.localeCompare(b.tipo_gasto))
+    .map((n1) => ({
+      ...n1,
+      detalles: n1.detalles
+        .sort((a, b) => a.detalle_gasto.localeCompare(b.detalle_gasto))
+        .map((n2) => ({
+          ...n2,
+          cuentas: n2.cuentas
+            .sort((a, b) => a.nombre_cuenta.localeCompare(b.nombre_cuenta))
+            .map((n3) => ({ ...n3, terceros: n3.terceros.sort((a, b) => sumAll(b.valores) - sumAll(a.valores)) })),
+        })),
+    }));
+}
+
 // ─────────────────────────────────────────────
 // TAB MES A MES
 // ─────────────────────────────────────────────
 function TabMesAMes({ plan, filtros, onAuditoria }: TabProps) {
   const [ccActivo, setCcActivo] = useState("TODOS");
   const [openRows, setOpenRows] = useState<Set<number>>(new Set());
+  const [openN1, setOpenN1] = useState<Set<string>>(new Set());
+  const [openN2, setOpenN2] = useState<Set<string>>(new Set());
+  const [openN3, setOpenN3] = useState<Set<string>>(new Set());
 
   const eriAll = useEriAllMonths({ año: filtros.año, compania: filtros.compania, ccKey: ccActivo });
+  const gastos = useGastosPorCC({ año: filtros.año, mes: "Todos", compania: filtros.compania });
 
   const terceroCount = useEriTerceroCount({
     año: filtros.año,
@@ -399,7 +450,6 @@ function TabMesAMes({ plan, filtros, onAuditoria }: TabProps) {
 
   const planRows: PlanPygRow[] = plan.data ?? [];
 
-  // Todo desde v_eri_resumida — sin v_gastos_por_tercero
   const { valueMap, months, sub } = useMemo(() => {
     const valueMap = new Map<number, Map<number, number>>();
     const monthSet = new Set<number>();
@@ -416,10 +466,42 @@ function TabMesAMes({ plan, filtros, onAuditoria }: TabProps) {
     return { valueMap, months, sub };
   }, [eriAll.data, planRows]);
 
+  // Build tree keyed by año_mes_num (as string) for mes-a-mes
+  const gasTree = useMemo(() => buildTree(gastos.data ?? [], (r) => String(r.año_mes_num)), [gastos.data]);
+
+  // Filter by CC if not TODOS
+  const gastosFiltered = useMemo(() => {
+    if (ccActivo === "TODOS") return gastos.data ?? [];
+    return (gastos.data ?? []).filter((r) => r.cc_key === ccActivo);
+  }, [gastos.data, ccActivo]);
+
+  const gasTreeFiltered = useMemo(() => buildTree(gastosFiltered, (r) => String(r.año_mes_num)), [gastosFiltered]);
+
+  const gopTreeMes = gasTreeFiltered.find((n) => n.tipo_gasto === "01.GASTOS OPERACIONALES");
+  const gnopTreeMes = gasTreeFiltered.find((n) => n.tipo_gasto === "02.GASTO NO OPERACIONAL");
+
   const ingTot = Math.abs(sub.ing) || 1;
-  const isLoading = plan.isLoading || eriAll.isLoading;
+  const isLoading = plan.isLoading || eriAll.isLoading || gastos.isLoading;
   const isError = plan.isError || eriAll.isError;
 
+  const togN1 = (k: string) =>
+    setOpenN1((p) => {
+      const s = new Set(p);
+      s.has(k) ? s.delete(k) : s.add(k);
+      return s;
+    });
+  const togN2 = (k: string) =>
+    setOpenN2((p) => {
+      const s = new Set(p);
+      s.has(k) ? s.delete(k) : s.add(k);
+      return s;
+    });
+  const togN3 = (k: string) =>
+    setOpenN3((p) => {
+      const s = new Set(p);
+      s.has(k) ? s.delete(k) : s.add(k);
+      return s;
+    });
   const toggleRow = (orden: number) =>
     setOpenRows((p) => {
       const s = new Set(p);
@@ -427,10 +509,31 @@ function TabMesAMes({ plan, filtros, onAuditoria }: TabProps) {
       return s;
     });
 
-  const esCuentaDetalle = (row: PlanPygRow) => row.nivel === "Cuenta" && ["4", "5", "6"].includes(claseCod(row));
+  const handleExpandAll = () => {
+    const allTrees = [...gasTreeFiltered];
+    setOpenN1(new Set(allTrees.map((n) => n.tipo_gasto)));
+    setOpenN2(new Set(allTrees.flatMap((n) => n.detalles.map((d) => `${n.tipo_gasto}||${d.detalle_gasto}`))));
+    setOpenN3(
+      new Set(
+        allTrees.flatMap((n) =>
+          n.detalles.flatMap((d) => d.cuentas.map((c) => `${n.tipo_gasto}||${d.detalle_gasto}||${c.nombre_cuenta}`)),
+        ),
+      ),
+    );
+  };
+  const handleCollapseAll = () => {
+    setOpenN1(new Set());
+    setOpenN2(new Set());
+    setOpenN3(new Set());
+  };
 
+  const esCuentaDetalle = (row: PlanPygRow) => row.nivel === "Cuenta" && ["4", "5", "6"].includes(claseCod(row));
   const getMonthVals = (orden: number) => months.map((m) => valueMap.get(orden)?.get(m) ?? 0);
   const getTotal = (orden: number) => getMonthVals(orden).reduce((s, v) => s + v, 0);
+
+  // Sum tree node values across months
+  const nodeMonthVals = (vals: VCC) => months.map((m) => vals[String(m)] ?? 0);
+  const nodeTotal = (vals: VCC) => months.reduce((s, m) => s + (vals[String(m)] ?? 0), 0);
 
   const MC = ({ v, bold = false }: { v: number; bold?: boolean }) => {
     const f = fmtCell(v);
@@ -555,10 +658,172 @@ function TabMesAMes({ plan, filtros, onAuditoria }: TabProps) {
     </tr>
   );
 
+  // ── Tree rows for TabMesAMes (columns = months) ──────────────────────────
+  const GasTreeMes = ({ n1 }: { n1: N1 }) => {
+    const k1 = n1.tipo_gasto;
+    const o1 = openN1.has(k1);
+    const mv1 = nodeMonthVals(n1.valores);
+    const tot1 = nodeTotal(n1.valores);
+    const f1 = fmtCell(tot1);
+    const pct1 = ingTot ? (tot1 / ingTot) * 100 : null;
+    return (
+      <Fragment key={k1}>
+        <tr
+          className="cursor-pointer border-b border-border/40 hover:opacity-90"
+          style={{ background: "#151f33" }}
+          onClick={() => togN1(k1)}
+        >
+          <td className="px-3 py-1.5 pl-5 text-[11px] font-semibold text-foreground">
+            <span className="mr-2 text-[10px] text-muted-foreground">{o1 ? "▼" : "▶"}</span>
+            {n1.tipo_gasto}
+          </td>
+          {mv1.map((v, i) => (
+            <MC key={i} v={v} bold />
+          ))}
+          <td
+            className={`whitespace-nowrap px-3 py-1.5 text-right font-bold tabular-nums text-[11px] ${f1.neg ? "text-destructive" : f1.zero ? "text-muted-foreground" : "text-foreground"}`}
+          >
+            {f1.text}
+          </td>
+          <td className="whitespace-nowrap px-3 py-1.5 text-right text-[10px] tabular-nums text-muted-foreground">
+            {pct1 != null && tot1 !== 0 ? `${pct1.toFixed(2)}%` : "-"}
+          </td>
+        </tr>
+        {o1 &&
+          n1.detalles.map((n2) => {
+            const k2 = `${k1}||${n2.detalle_gasto}`;
+            const o2 = openN2.has(k2);
+            const mv2 = nodeMonthVals(n2.valores);
+            const tot2 = nodeTotal(n2.valores);
+            if (tot2 === 0 && mv2.every((v) => v === 0)) return null;
+            const f2 = fmtCell(tot2);
+            const pct2 = ingTot ? (tot2 / ingTot) * 100 : null;
+            return (
+              <Fragment key={k2}>
+                <tr
+                  className="cursor-pointer border-b border-border/30 hover:opacity-90"
+                  style={{ background: "#0d1525" }}
+                  onClick={() => togN2(k2)}
+                >
+                  <td className="px-3 py-1.5 pl-10 text-[11px] text-muted-foreground">
+                    <span className="mr-2 text-[10px] text-muted-foreground/60">{o2 ? "▾" : "▸"}</span>
+                    {n2.detalle_gasto}
+                  </td>
+                  {mv2.map((v, i) => (
+                    <MC key={i} v={v} />
+                  ))}
+                  <td
+                    className={`whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-[11px] ${f2.neg ? "text-destructive" : f2.zero ? "text-muted-foreground/30" : "text-foreground"}`}
+                  >
+                    {f2.text}
+                  </td>
+                  <td className="whitespace-nowrap px-3 py-1.5 text-right text-[10px] tabular-nums text-muted-foreground">
+                    {pct2 != null && tot2 !== 0 ? `${pct2.toFixed(2)}%` : "-"}
+                  </td>
+                </tr>
+                {o2 &&
+                  n2.cuentas.map((n3) => {
+                    const k3 = `${k2}||${n3.nombre_cuenta}`;
+                    const o3 = openN3.has(k3);
+                    const mv3 = nodeMonthVals(n3.valores);
+                    const tot3 = nodeTotal(n3.valores);
+                    if (tot3 === 0 && mv3.every((v) => v === 0)) return null;
+                    const f3 = fmtCell(tot3);
+                    const pct3 = ingTot ? (tot3 / ingTot) * 100 : null;
+                    return (
+                      <Fragment key={k3}>
+                        <tr
+                          className="cursor-pointer border-b border-border/10 hover:opacity-80"
+                          onClick={() => togN3(k3)}
+                        >
+                          <td className="px-3 py-1 pl-16 text-[11px] text-muted-foreground/80">
+                            <span className="mr-2 text-[10px] text-muted-foreground/40">{o3 ? "▾" : "▸"}</span>
+                            {n3.nombre_cuenta}
+                          </td>
+                          {mv3.map((v, i) => (
+                            <MC key={i} v={v} />
+                          ))}
+                          <td
+                            className={`whitespace-nowrap px-3 py-1.5 text-right tabular-nums text-[11px] ${f3.neg ? "text-destructive" : f3.zero ? "text-muted-foreground/30" : "text-foreground"}`}
+                          >
+                            {f3.text}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-1.5 text-right text-[10px] tabular-nums text-muted-foreground">
+                            {pct3 != null && tot3 !== 0 ? `${pct3.toFixed(2)}%` : "-"}
+                          </td>
+                        </tr>
+                        {o3 &&
+                          n3.terceros.map((t, ti) => {
+                            const mvT = nodeMonthVals(t.valores);
+                            const totT = nodeTotal(t.valores);
+                            const fT = fmtCell(totT);
+                            const pctT = ingTot ? (totT / ingTot) * 100 : null;
+                            return (
+                              <tr
+                                key={`${k3}||${ti}`}
+                                className="border-b border-border/10"
+                                style={{ background: "#080c18" }}
+                              >
+                                <td className="px-3 py-0.5 pl-20">
+                                  <div className="flex items-center gap-2">
+                                    {t.nit && t.nit !== "SIN TERCERO" && (
+                                      <span className="flex-shrink-0 rounded bg-muted/40 px-1 font-mono text-[9px] text-muted-foreground">
+                                        {t.nit}
+                                      </span>
+                                    )}
+                                    <span className="text-[10px] text-muted-foreground/60">{t.tercero}</span>
+                                  </div>
+                                </td>
+                                {mvT.map((v, i) => {
+                                  const f = fmtCell(v);
+                                  return (
+                                    <td
+                                      key={i}
+                                      className={`whitespace-nowrap px-3 py-1 text-right text-[10px] tabular-nums ${f.neg ? "text-destructive/70" : f.zero ? "text-muted-foreground/20" : "text-muted-foreground/60"}`}
+                                    >
+                                      {f.text}
+                                    </td>
+                                  );
+                                })}
+                                <td
+                                  className={`whitespace-nowrap px-3 py-1 text-right text-[10px] tabular-nums ${fT.neg ? "text-destructive" : "text-muted-foreground/50"}`}
+                                >
+                                  {fT.text}
+                                </td>
+                                <td className="whitespace-nowrap px-3 py-1 text-right text-[10px] tabular-nums text-muted-foreground">
+                                  {pctT != null && totT !== 0 ? `${pctT.toFixed(2)}%` : "-"}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                      </Fragment>
+                    );
+                  })}
+              </Fragment>
+            );
+          })}
+      </Fragment>
+    );
+  };
+
   return (
     <div>
-      <div className="mb-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <CcPills value={ccActivo} onChange={setCcActivo} />
+        <div className="flex gap-2">
+          <button
+            onClick={handleExpandAll}
+            className="rounded-md border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            Expandir todo
+          </button>
+          <button
+            onClick={handleCollapseAll}
+            className="rounded-md border border-border px-3 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            Contraer todo
+          </button>
+        </div>
       </div>
       {isLoading ? (
         <div className="space-y-2">
@@ -609,9 +874,7 @@ function TabMesAMes({ plan, filtros, onAuditoria }: TabProps) {
               <SubRow label="UTILIDAD BRUTA" mv={sub.ubMes} tot={sub.ub} />
 
               <SH label="GASTOS OPERACIONALES" />
-              {sub.gastOpC.map((r) => (
-                <CuentaRow key={r.orden} row={r} />
-              ))}
+              {gopTreeMes && <GasTreeMes n1={gopTreeMes} />}
               <TotalRow label="TOTAL GASTOS OPERACIONALES" mv={sub.gopMes} tot={sub.gop} />
               <SubRow label="UTILIDAD OPERACIONAL" mv={sub.uoMes} tot={sub.uo} />
 
@@ -622,9 +885,7 @@ function TabMesAMes({ plan, filtros, onAuditoria }: TabProps) {
               <TotalRow label="TOTAL OTROS INGRESOS" mv={sub.oiMes} tot={sub.oi} />
 
               <SH label="OTROS GASTOS" />
-              {sub.gastNoOpC.map((r) => (
-                <CuentaRow key={r.orden} row={r} />
-              ))}
+              {gnopTreeMes && <GasTreeMes n1={gnopTreeMes} />}
               <TotalRow label="TOTAL OTROS GASTOS" mv={sub.gnopMes} tot={sub.gnop} />
               <SubRow label="UTILIDAD ANTES DE IMPUESTOS" mv={sub.uaiMes} tot={sub.uai} />
             </tbody>
@@ -638,81 +899,13 @@ function TabMesAMes({ plan, filtros, onAuditoria }: TabProps) {
 // ─────────────────────────────────────────────
 // TAB POR CC
 // ─────────────────────────────────────────────
-interface VCC {
-  [cc: string]: number;
-}
-interface N4 {
-  tercero: string;
-  nit: string;
-  valores: VCC;
-}
-interface N3 {
-  nombre_cuenta: string;
-  valores: VCC;
-  terceros: N4[];
-}
-interface N2 {
-  detalle_gasto: string;
-  valores: VCC;
-  cuentas: N3[];
-}
-interface N1 {
-  tipo_gasto: string;
-  valores: VCC;
-  detalles: N2[];
-}
-
-function buildTree(rows: GastoTerceroRow[]): N1[] {
-  const map = new Map<string, Map<string, number>>();
-  for (const r of rows) {
-    const key = `${r.tipo_gasto}||${r.detalle_gasto}||${r.nombre_cuenta}||${r.tercero_nombre}||${r.nit}`;
-    if (!map.has(key)) map.set(key, new Map());
-    map.get(key)!.set(r.cc_key, (map.get(key)!.get(r.cc_key) ?? 0) + (Number(r.gasto_real) || 0) * -1);
-  }
-  const n1Map = new Map<string, N1>();
-  for (const [key, ccMap] of map.entries()) {
-    const [tipo, det, nom, terc, nit] = key.split("||");
-    const vals: VCC = {};
-    for (const [cc, v] of ccMap.entries()) vals[cc] = v;
-    if (!n1Map.has(tipo)) n1Map.set(tipo, { tipo_gasto: tipo, valores: {}, detalles: [] });
-    const n1 = n1Map.get(tipo)!;
-    for (const [cc, v] of Object.entries(vals)) n1.valores[cc] = (n1.valores[cc] ?? 0) + v;
-    let n2 = n1.detalles.find((d) => d.detalle_gasto === det);
-    if (!n2) {
-      n2 = { detalle_gasto: det, valores: {}, cuentas: [] };
-      n1.detalles.push(n2);
-    }
-    for (const [cc, v] of Object.entries(vals)) n2.valores[cc] = (n2.valores[cc] ?? 0) + v;
-    let n3 = n2.cuentas.find((c) => c.nombre_cuenta === nom);
-    if (!n3) {
-      n3 = { nombre_cuenta: nom, valores: {}, terceros: [] };
-      n2.cuentas.push(n3);
-    }
-    for (const [cc, v] of Object.entries(vals)) n3.valores[cc] = (n3.valores[cc] ?? 0) + v;
-    n3.terceros.push({ tercero: terc?.replace(/\d+$/, "").trim() || "Sin identificar", nit, valores: vals });
-  }
-  return Array.from(n1Map.values())
-    .sort((a, b) => a.tipo_gasto.localeCompare(b.tipo_gasto))
-    .map((n1) => ({
-      ...n1,
-      detalles: n1.detalles
-        .sort((a, b) => a.detalle_gasto.localeCompare(b.detalle_gasto))
-        .map((n2) => ({
-          ...n2,
-          cuentas: n2.cuentas
-            .sort((a, b) => a.nombre_cuenta.localeCompare(b.nombre_cuenta))
-            .map((n3) => ({ ...n3, terceros: n3.terceros.sort((a, b) => sumAll(b.valores) - sumAll(a.valores)) })),
-        })),
-    }));
-}
-
 function TabPorCC({ plan, filtros, onAuditoria }: TabProps) {
   const [mesLocal, setMesLocal] = useState<number | "Todos">("Todos");
   const [openRows, setOpenRows] = useState<Set<number>>(new Set());
 
   const gastos = useGastosPorCC({ año: filtros.año, mes: mesLocal, compania: filtros.compania });
   const eriCC = useEriAllCC({ año: filtros.año, compania: filtros.compania, mes: mesLocal });
-  const tree = useMemo(() => buildTree(gastos.data ?? []), [gastos.data]);
+  const tree = useMemo(() => buildTree(gastos.data ?? [], (r) => r.cc_key), [gastos.data]);
 
   const terceroCount = useEriTerceroCount({
     año: filtros.año,
@@ -720,7 +913,6 @@ function TabPorCC({ plan, filtros, onAuditoria }: TabProps) {
     mes: mesLocal,
   });
 
-  // eriMap: orden → cc_key → valor (desde v_eri_resumida)
   const eriMap = useMemo(() => {
     const m = new Map<number, Map<string, number>>();
     for (const r of eriCC.data ?? []) {
@@ -733,7 +925,6 @@ function TabPorCC({ plan, filtros, onAuditoria }: TabProps) {
 
   const planRows: PlanPygRow[] = plan.data ?? [];
 
-  // Subtotales 100% desde v_eri_resumida
   const { vIng, vCost, vUB, vGop, vUO, vOI, vGnop, vUAI, ingC, costC, gastOpC, gastNoOpC, oiC } = useMemo(
     () => calcSubtotalesPorCC(planRows, eriMap),
     [planRows, eriMap],
