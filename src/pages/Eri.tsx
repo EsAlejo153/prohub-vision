@@ -1166,7 +1166,7 @@ function TabPorCC({ plan, filtros, onAuditoria }: TabProps) {
           n1.detalles.map((n2) => {
             const k2 = `${k1}||${n2.detalle_gasto}`;
             const o2 = openN2.has(k2);
-            if (sumAll(n2.valores) === 0) return null;
+            if (Math.abs(sumAll(n2.valores)) < 0.01) return null;
             return (
               <Fragment key={k2}>
                 <tr
@@ -1191,7 +1191,7 @@ function TabPorCC({ plan, filtros, onAuditoria }: TabProps) {
                   n2.cuentas.map((n3) => {
                     const k3 = `${k2}||${n3.nombre_cuenta}`;
                     const o3 = openN3.has(k3);
-                    if (sumAll(n3.valores) === 0) return null;
+                    if (Math.abs(sumAll(n3.valores)) < 0.01) return null;
                     return (
                       <Fragment key={k3}>
                         <tr
@@ -1436,7 +1436,7 @@ function TabAuditoria({ plan, filtros, ctx }: { plan: PlanQuery; filtros: Filtro
             <option value="">-- Selecciona una cuenta --</option>
             {cuentasDetalle.map((r) => (
               <option key={r.orden} value={r.orden}>
-                {r.cuenta_key ? `${r.cuenta_key} · ${r.concepto}` : r.etiqueta_fila || r.concepto}
+                {(r as any).cuenta_key ? `${(r as any).cuenta_key} · ${r.concepto}` : r.etiqueta_fila || r.concepto}
               </option>
             ))}
           </select>
