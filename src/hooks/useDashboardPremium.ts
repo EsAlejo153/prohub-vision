@@ -176,39 +176,75 @@ export function useTopCuentas(filtros: FiltroDashboard) {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// useBalanceFallback — lee v_esf_resumida en lugar de movimientos directamente
+//
+// LÓGICA:
+//   1. Detecta el último año_mes_num disponible en v_esf_resumida dentro del
+//      rango de filtros (o el más reciente si no hay filtro de mes)
+//   2. Suma valor_presentacion agrupado por seccion para ese mes
+//   3. ACTIVO  = suma seccion='ACTIVO'
+//      PASIVO  = suma seccion='PASIVO'
+//      PATRIMONIO = suma seccion='PATRIMONIO' (incluye CuentaERI = Utilidad)
+//   4. Si compania='Todas', consolida IQLICK + PROHUB S.A.S. sumando ambas
+// ─────────────────────────────────────────────────────────────────────────────
 export function useBalanceFallback(filtros: FiltroDashboard, enabled: boolean) {
   return useQuery({
-    queryKey: ["balance_fallback", filtros],
+    queryKey: ["balance_fallback_esf", filtros],
     enabled,
     queryFn: async (): Promise<BalanceTotals> => {
-      // Paso 1: obtener el último mes disponible dentro del rango de filtros
-      let qMes = supabase.from("movimientos").select("año_mes_num").order("año_mes_num", { ascending: false }).limit(1);
+      // ── Paso 1: detectar el último mes con datos de balance en v_esf_resumida ──
+      let qMes = supabase
+        .from("v_esf_resumida")
+        .select("año_mes_num")
+        .not("año_mes_num", "is", null)
+        .order("año_mes_num", { ascending: false })
+        .limit(1);
 
-      if (filtros.compania !== "Todas") qMes = qMes.eq("compania", filtros.compania);
+      // Filtro de compañía
+      if (filtros.compania !== "Todas") {
+        qMes = qMes.eq("compania", filtros.compania);
+      }
 
+      // Filtro de rango de período
       const range = buildPeriodoRange(filtros.año, filtros.mes);
-      if (range) qMes = qMes.lte("año_mes_num", range.max).gte("año_mes_num", range.min);
+      if (range) {
+        qMes = qMes.lte("año_mes_num", range.max).gte("año_mes_num", range.min);
+      }
 
-      const { data: mesData } = await qMes;
+      const { data: mesData, error: mesError } = await qMes;
+      if (mesError) throw mesError;
+
       const ultimoMes = (mesData?.[0] as any)?.año_mes_num;
       if (!ultimoMes) return { activos: 0, pasivos: 0, patrimonio: 0 };
 
-      // Paso 2: traer saldos SOLO del último mes (saldo_final es stock, no se suma)
-      let q = supabase.from("movimientos").select("clase_cod, saldo_final").eq("año_mes_num", ultimoMes);
+      // ── Paso 2: traer todas las filas de ese mes desde v_esf_resumida ──
+      let q = supabase
+        .from("v_esf_resumida")
+        .select("compania, seccion, valor_presentacion")
+        .eq("año_mes_num", ultimoMes)
+        .in("nivel", ["Cuenta", "CuentaERI"]); // solo filas base, no totales duplicados
 
-      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+      if (filtros.compania !== "Todas") {
+        q = q.eq("compania", filtros.compania);
+      }
 
       const { data, error } = await q;
       if (error) throw error;
 
-      const rows = (data ?? []) as { clase_cod: string | null; saldo_final: number | null }[];
-      const sumOf = (cls: string) =>
-        rows.filter((r) => String(r.clase_cod).trim() === cls).reduce((s, r) => s + (Number(r.saldo_final) || 0), 0);
+      const rows = (data ?? []) as {
+        compania: string;
+        seccion: string;
+        valor_presentacion: number | null;
+      }[];
 
-      const activos = sumOf("1");
-      const pasivos = sumOf("2");
-      const patrimonio3 = sumOf("3");
-      const patrimonio = patrimonio3 !== 0 ? patrimonio3 : activos - pasivos;
+      // ── Paso 3: sumar por sección ──
+      const sumOf = (seccion: string) =>
+        rows.filter((r) => r.seccion === seccion).reduce((s, r) => s + (Number(r.valor_presentacion) || 0), 0);
+
+      const activos = sumOf("ACTIVO");
+      const pasivos = sumOf("PASIVO");
+      const patrimonio = sumOf("PATRIMONIO");
 
       return { activos, pasivos, patrimonio };
     },
