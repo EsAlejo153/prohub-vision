@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState } from "react";
 import AppLayout from "@/components/layout/AppLayout";
 import { useFiltros } from "@/context/FiltrosContext";
-import { useEsf, useMesesEsf, usePlanEsf } from "@/hooks/useEsf";
+import { useEsf, useMesesEsf, usePlanEsf, useEsfTerceros } from "@/hooks/useEsf";
 import { LoadingSkeleton, ErrorState } from "@/components/dashboard/StateMessages";
 
 const MES_LABELS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
@@ -39,6 +39,7 @@ export default function Balance() {
     ]),
   );
   const [openSecciones, setOpenSecciones] = useState<Set<string>>(new Set(["ACTIVO", "PASIVO", "PATRIMONIO"]));
+  const [openCuentas, setOpenCuentas] = useState<Set<number>>(new Set());
 
   const mesActivo = mesSelec ?? meses[0] ?? null;
 
@@ -47,6 +48,11 @@ export default function Balance() {
     isLoading,
     isError,
   } = useEsf({
+    año_mes_num: mesActivo,
+    compania: filtros.compania,
+  });
+
+  const { data: terceroData = [] } = useEsfTerceros({
     año_mes_num: mesActivo,
     compania: filtros.compania,
   });
@@ -63,12 +69,28 @@ export default function Balance() {
       s.has(k) ? s.delete(k) : s.add(k);
       return s;
     });
+  const togCuenta = (orden: number) =>
+    setOpenCuentas((p) => {
+      const s = new Set(p);
+      s.has(orden) ? s.delete(orden) : s.add(orden);
+      return s;
+    });
 
   const valorMap = useMemo(() => {
     const m = new Map<number, number>();
     for (const r of esfData) m.set(r.orden, r.valor_presentacion ?? 0);
     return m;
   }, [esfData]);
+
+  // Terceros agrupados por orden_cuenta
+  const tercerosPorCuenta = useMemo(() => {
+    const map = new Map<number, typeof terceroData>();
+    for (const r of terceroData) {
+      if (!map.has(r.orden_cuenta)) map.set(r.orden_cuenta, []);
+      map.get(r.orden_cuenta)!.push(r);
+    }
+    return map;
+  }, [terceroData]);
 
   const totalGrupo = (grupoTitulo: string, seccion: string): number =>
     planEsf
@@ -107,11 +129,11 @@ export default function Balance() {
     return map;
   }, [planEsf]);
 
-  const CV = ({ v }: { v: number }) => {
+  const CV = ({ v, bold = false }: { v: number; bold?: boolean }) => {
     const f = fmtCOP(v);
     return (
       <td
-        className={`whitespace-nowrap px-4 py-1 text-right tabular-nums text-[12px] ${f.neg ? "text-destructive" : f.zero ? "text-muted-foreground/30" : "text-foreground"}`}
+        className={`whitespace-nowrap px-4 py-1 text-right tabular-nums text-[12px] ${bold ? "font-bold" : ""} ${f.neg ? "text-destructive" : f.zero ? "text-muted-foreground/30" : "text-foreground"}`}
       >
         {f.text}
       </td>
@@ -255,13 +277,73 @@ export default function Balance() {
                             {openGrupos.has(key) &&
                               cuentas.map((c) => {
                                 const v = valorMap.get(c.orden) ?? 0;
+                                const f = fmtCOP(v);
+                                const terceros = tercerosPorCuenta.get(c.orden) ?? [];
+                                const isOpen = openCuentas.has(c.orden);
+                                const hasTerceros = terceros.length > 0;
                                 return (
-                                  <tr key={c.orden} className="border-b border-border/10">
-                                    <td className="px-4 py-1 pl-14 text-[11px] text-muted-foreground/80">
-                                      {c.concepto}
-                                    </td>
-                                    <CV v={v} />
-                                  </tr>
+                                  <Fragment key={c.orden}>
+                                    {/* Fila de cuenta */}
+                                    <tr
+                                      className={`border-b border-border/10 ${hasTerceros ? "cursor-pointer hover:bg-muted/10" : ""}`}
+                                      onClick={() => hasTerceros && togCuenta(c.orden)}
+                                    >
+                                      <td className="px-4 py-1 pl-14 text-[11px] text-muted-foreground/80">
+                                        <span className="flex items-center gap-2">
+                                          {hasTerceros && (
+                                            <span className="text-[9px] text-muted-foreground/50">
+                                              {isOpen ? "▾" : "▸"}
+                                            </span>
+                                          )}
+                                          {c.concepto}
+                                        </span>
+                                      </td>
+                                      <td
+                                        className={`whitespace-nowrap px-4 py-1 text-right tabular-nums text-[11px] ${f.neg ? "text-destructive" : f.zero ? "text-muted-foreground/30" : "text-foreground"}`}
+                                      >
+                                        {f.text}
+                                      </td>
+                                    </tr>
+                                    {/* Desglose por tercero */}
+                                    {isOpen && hasTerceros && (
+                                      <>
+                                        <tr style={{ background: "#050a14" }}>
+                                          <td className="px-4 py-0.5 pl-20 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/40">
+                                            Tercero / NIT
+                                          </td>
+                                          <td className="px-4 py-0.5 text-right text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/40">
+                                            Saldo
+                                          </td>
+                                        </tr>
+                                        {terceros.map((t, ti) => {
+                                          const ft = fmtCOP(t.valor_presentacion);
+                                          return (
+                                            <tr
+                                              key={`${c.orden}-${ti}`}
+                                              className="border-b border-border/5"
+                                              style={{ background: ti % 2 === 0 ? "#060b15" : "#080c18" }}
+                                            >
+                                              <td className="px-4 py-0.5 pl-20">
+                                                <div className="flex items-center gap-2">
+                                                  <span className="flex-shrink-0 rounded bg-muted/30 px-1 font-mono text-[9px] text-muted-foreground/50">
+                                                    {t.tercero_key}
+                                                  </span>
+                                                  <span className="text-[10px] text-muted-foreground/60">
+                                                    {t.nombre_tercero ?? "Sin nombre"}
+                                                  </span>
+                                                </div>
+                                              </td>
+                                              <td
+                                                className={`whitespace-nowrap px-4 py-0.5 text-right tabular-nums text-[10px] ${ft.neg ? "text-destructive/70" : ft.zero ? "text-muted-foreground/20" : "text-muted-foreground/70"}`}
+                                              >
+                                                {ft.text}
+                                              </td>
+                                            </tr>
+                                          );
+                                        })}
+                                      </>
+                                    )}
+                                  </Fragment>
                                 );
                               })}
                             {openGrupos.has(key) && (
