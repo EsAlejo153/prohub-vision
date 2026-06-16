@@ -7,19 +7,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { AlertTriangle, CheckCircle2, EyeOff, Layers, Search } from "lucide-react";
+import { AlertTriangle, CheckCircle2, EyeOff, Layers, Pencil, Search } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import {
-  useAlertaCuentas,
-  useCuentasSinClasificar,
-  useGruposPyg,
-  clasificarCuenta,
-} from "@/hooks/useClasificacion";
+import { useAlertaCuentas, useCuentasSinClasificar, useGruposPyg, clasificarCuenta } from "@/hooks/useClasificacion";
+import type { CuentaSinClasificar } from "@/hooks/useClasificacion";
 import { LoadingSkeleton, ErrorState, EmptyState } from "@/components/dashboard/StateMessages";
 import { formatCOP } from "@/lib/format";
 import ClasificarCuentaCell from "@/components/configuracion/ClasificarCuentaCell";
 import CentrosCostoTab from "@/components/configuracion/CentrosCostoTab";
+import EditarCuentaModal from "@/components/configuracion/EditarCuentaModal";
 
 const BALANCE_CLASES = new Set(["1", "2", "3", "7", "8", "9"]);
 
@@ -35,6 +32,10 @@ export default function Configuracion() {
   const [bulkGrupo, setBulkGrupo] = useState<string>("");
   const [bulkBusy, setBulkBusy] = useState(false);
 
+  // Estado del modal de edición
+  const [cuentaEditar, setCuentaEditar] = useState<CuentaSinClasificar | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+
   const filtros = useMemo(
     () => ({
       claseCod: claseFilter === "all" ? undefined : claseFilter,
@@ -42,10 +43,10 @@ export default function Configuracion() {
         estadoFilter === "sin"
           ? ("sin" as const)
           : estadoFilter === "clasificadas"
-          ? ("clasificadas" as const)
-          : estadoFilter === "ignoradas"
-          ? ("ignoradas" as const)
-          : undefined,
+            ? ("clasificadas" as const)
+            : estadoFilter === "ignoradas"
+              ? ("ignoradas" as const)
+              : undefined,
       search: search.trim() || undefined,
     }),
     [claseFilter, estadoFilter, search],
@@ -55,9 +56,7 @@ export default function Configuracion() {
 
   const toggleAll = (checked: boolean) => {
     if (!checked) return setSelected(new Set());
-    const all = (cuentas ?? [])
-      .filter((c) => !BALANCE_CLASES.has(c.clase_cod ?? ""))
-      .map((c) => c.cuenta_key);
+    const all = (cuentas ?? []).filter((c) => !BALANCE_CLASES.has(c.clase_cod ?? "")).map((c) => c.cuenta_key);
     setSelected(new Set(all));
   };
   const toggleOne = (key: string) => {
@@ -123,6 +122,16 @@ export default function Configuracion() {
     }
   };
 
+  const handleEditar = (cuenta: CuentaSinClasificar) => {
+    setCuentaEditar(cuenta);
+    setModalOpen(true);
+  };
+
+  const handleCloseModal = () => {
+    setModalOpen(false);
+    setCuentaEditar(null);
+  };
+
   const pendientes = alerta?.pendientes_eri ?? 0;
 
   return (
@@ -151,22 +160,44 @@ export default function Configuracion() {
                 </span>
               </AlertTitle>
               <AlertDescription className="text-amber-200/90">
-                Hay {pendientes} cuentas nuevas detectadas que no están clasificadas en el ERI.
-                Clasifícalas para que aparezcan correctamente en los reportes.
+                Hay {pendientes} cuentas nuevas detectadas que no están clasificadas en el ERI. Clasifícalas para que
+                aparezcan correctamente en los reportes.
               </AlertDescription>
             </Alert>
           )}
 
           <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-            <StatCard label="Pendientes ERI" value={alerta?.pendientes_eri ?? 0} tone="amber" icon={<AlertTriangle className="h-4 w-4" />} />
-            <StatCard label="Clasificadas" value={alerta?.clasificadas ?? 0} tone="green" icon={<CheckCircle2 className="h-4 w-4" />} />
-            <StatCard label="Ignoradas (balance)" value={alerta?.ignoradas ?? 0} tone="gray" icon={<EyeOff className="h-4 w-4" />} />
-            <StatCard label="Total detectadas" value={alerta?.total_detectadas ?? 0} tone="blue" icon={<Layers className="h-4 w-4" />} />
+            <StatCard
+              label="Pendientes ERI"
+              value={alerta?.pendientes_eri ?? 0}
+              tone="amber"
+              icon={<AlertTriangle className="h-4 w-4" />}
+            />
+            <StatCard
+              label="Clasificadas"
+              value={alerta?.clasificadas ?? 0}
+              tone="green"
+              icon={<CheckCircle2 className="h-4 w-4" />}
+            />
+            <StatCard
+              label="Ignoradas (balance)"
+              value={alerta?.ignoradas ?? 0}
+              tone="gray"
+              icon={<EyeOff className="h-4 w-4" />}
+            />
+            <StatCard
+              label="Total detectadas"
+              value={alerta?.total_detectadas ?? 0}
+              tone="blue"
+              icon={<Layers className="h-4 w-4" />}
+            />
           </div>
 
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card p-3">
             <Select value={claseFilter} onValueChange={setClaseFilter}>
-              <SelectTrigger className="h-9 w-48 text-xs"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-9 w-48 text-xs">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todas las clases</SelectItem>
                 <SelectItem value="4">4 - Ingresos</SelectItem>
@@ -177,7 +208,9 @@ export default function Configuracion() {
             </Select>
 
             <Select value={estadoFilter} onValueChange={setEstadoFilter}>
-              <SelectTrigger className="h-9 w-44 text-xs"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-9 w-44 text-xs">
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todas</SelectItem>
                 <SelectItem value="sin">Sin clasificar</SelectItem>
@@ -201,31 +234,52 @@ export default function Configuracion() {
             <div className="flex flex-wrap items-center gap-2 rounded-lg border border-primary/40 bg-primary/5 p-3">
               <span className="text-xs font-medium">{selected.size} seleccionadas</span>
               <Select value={bulkGrupo} onValueChange={setBulkGrupo}>
-                <SelectTrigger className="h-8 w-60 text-xs"><SelectValue placeholder="Clasificar seleccionadas en..." /></SelectTrigger>
+                <SelectTrigger className="h-8 w-60 text-xs">
+                  <SelectValue placeholder="Clasificar seleccionadas en..." />
+                </SelectTrigger>
                 <SelectContent>
-                  {grupos.map((g) => <SelectItem key={g} value={g} className="text-xs">{g}</SelectItem>)}
+                  {grupos.map((g) => (
+                    <SelectItem key={g} value={g} className="text-xs">
+                      {g}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
-              <Button size="sm" onClick={bulkClasificar} disabled={bulkBusy || !bulkGrupo}>Aplicar</Button>
-              <Button size="sm" variant="outline" onClick={bulkIgnorar} disabled={bulkBusy}>Ignorar seleccionadas</Button>
-              <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>Cancelar</Button>
+              <Button size="sm" onClick={bulkClasificar} disabled={bulkBusy || !bulkGrupo}>
+                Aplicar
+              </Button>
+              <Button size="sm" variant="outline" onClick={bulkIgnorar} disabled={bulkBusy}>
+                Ignorar seleccionadas
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setSelected(new Set())}>
+                Cancelar
+              </Button>
             </div>
           )}
 
           <div className="rounded-lg border border-border bg-card">
             {isLoading ? (
-              <div className="p-6"><LoadingSkeleton className="h-40" /></div>
+              <div className="p-6">
+                <LoadingSkeleton className="h-40" />
+              </div>
             ) : isError ? (
-              <div className="p-6"><ErrorState /></div>
+              <div className="p-6">
+                <ErrorState />
+              </div>
             ) : !cuentas || cuentas.length === 0 ? (
-              <div className="p-6"><EmptyState message="No hay cuentas que coincidan con los filtros" /></div>
+              <div className="p-6">
+                <EmptyState message="No hay cuentas que coincidan con los filtros" />
+              </div>
             ) : (
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-8">
                       <Checkbox
-                        checked={selected.size > 0 && selected.size === cuentas.filter((c) => !BALANCE_CLASES.has(c.clase_cod ?? "")).length}
+                        checked={
+                          selected.size > 0 &&
+                          selected.size === cuentas.filter((c) => !BALANCE_CLASES.has(c.clase_cod ?? "")).length
+                        }
                         onCheckedChange={(v) => toggleAll(Boolean(v))}
                       />
                     </TableHead>
@@ -235,6 +289,7 @@ export default function Configuracion() {
                     <TableHead className="text-xs text-right">Movs.</TableHead>
                     <TableHead className="text-xs text-right">Valor neto</TableHead>
                     <TableHead className="text-xs">Clasificar en ERI</TableHead>
+                    <TableHead className="w-16 text-xs">Editar</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -245,11 +300,9 @@ export default function Configuracion() {
                     const borderColor = isClasif
                       ? "border-l-success"
                       : isIgnor || isBalance
-                      ? "border-l-muted"
-                      : "border-l-amber-500";
-                    const rowClass = `border-l-2 ${borderColor} ${
-                      isIgnor || isBalance ? "opacity-70" : ""
-                    }`;
+                        ? "border-l-muted"
+                        : "border-l-amber-500";
+                    const rowClass = `border-l-2 ${borderColor} ${isIgnor || isBalance ? "opacity-70" : ""}`;
                     return (
                       <TableRow key={c.cuenta_key} className={rowClass}>
                         <TableCell>
@@ -265,8 +318,12 @@ export default function Configuracion() {
                           {c.nombre_cuenta ?? "—"}
                         </TableCell>
                         <TableCell className="text-xs text-muted-foreground">{c.tipo_cuenta ?? "—"}</TableCell>
-                        <TableCell className="text-right text-xs">{(c.total_movimientos ?? 0).toLocaleString("es-CO")}</TableCell>
-                        <TableCell className="text-right font-mono text-xs">{formatCOP(c.total_mov_neto ?? 0)}</TableCell>
+                        <TableCell className="text-right text-xs">
+                          {(c.total_movimientos ?? 0).toLocaleString("es-CO")}
+                        </TableCell>
+                        <TableCell className="text-right font-mono text-xs">
+                          {formatCOP(c.total_mov_neto ?? 0)}
+                        </TableCell>
                         <TableCell>
                           {isBalance ? (
                             <span className="inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
@@ -279,6 +336,18 @@ export default function Configuracion() {
                             </span>
                           ) : (
                             <ClasificarCuentaCell cuenta={c} grupos={grupos} />
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          {!isBalance && isClasif && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 w-7 p-0 text-muted-foreground hover:text-primary"
+                              onClick={() => handleEditar(c)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </Button>
                           )}
                         </TableCell>
                       </TableRow>
@@ -294,6 +363,8 @@ export default function Configuracion() {
           <CentrosCostoTab />
         </TabsContent>
       </Tabs>
+
+      <EditarCuentaModal cuenta={cuentaEditar} open={modalOpen} onClose={handleCloseModal} />
     </AppLayout>
   );
 }
@@ -313,10 +384,10 @@ function StatCard({
     tone === "amber"
       ? "border-amber-500/30 bg-amber-500/10 text-amber-400"
       : tone === "green"
-      ? "border-success/30 bg-success/10 text-success"
-      : tone === "blue"
-      ? "border-primary/30 bg-primary/10 text-primary"
-      : "border-border bg-muted/30 text-muted-foreground";
+        ? "border-success/30 bg-success/10 text-success"
+        : tone === "blue"
+          ? "border-primary/30 bg-primary/10 text-primary"
+          : "border-border bg-muted/30 text-muted-foreground";
   return (
     <div className={`rounded-lg border p-3 ${toneClass}`}>
       <div className="flex items-center justify-between text-[11px] uppercase tracking-wider">
