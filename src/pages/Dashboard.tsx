@@ -146,6 +146,7 @@ function HeroCard({
         overflow: "hidden",
         display: "flex",
         flexDirection: "column",
+        minHeight: 100,
       }}
     >
       <div
@@ -250,28 +251,21 @@ export default function Dashboard() {
   const last = rows.length ? rows[rows.length - 1] : null;
   const prevLabel = rows.length >= 2 ? rows[rows.length - 2].mes_label : null;
 
-  // ✅ FIX: balance es stock (saldo), NO se suma — solo último mes
   const totals = useMemo(() => {
     const sum = (k: keyof KpiMesRow) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
-
-    // Último mes = saldo vigente de balance (no acumular)
     const lastRow = rows.length ? rows[rows.length - 1] : null;
-
     return {
       ingresos: sum("ingresos"),
       utilOper: sum("utilidad_operacional"),
       utilNeta: sum("utilidad_neta"),
-      // Balance: solo el último mes disponible
       activos: lastRow ? Number(lastRow.activos_totales) || 0 : 0,
       pasivos: lastRow ? Number(lastRow.pasivos_totales) || 0 : 0,
       patrimonio: lastRow ? Number(lastRow.patrimonio_total) || 0 : 0,
     };
   }, [rows]);
 
-  // useBalanceFallback ya corregido para traer solo el último mes
   const { data: balFallback } = useBalanceFallback(filtros, true);
 
-  // Usar fallback solo si trae valores distintos de cero (más confiable)
   const balance =
     balFallback && (balFallback.activos !== 0 || balFallback.pasivos !== 0 || balFallback.patrimonio !== 0)
       ? balFallback
@@ -356,6 +350,7 @@ export default function Dashboard() {
   const dPct = (curr: number, prv: number | undefined) =>
     prv == null || prv === 0 ? null : ((curr - prv) / Math.abs(prv)) * 100;
 
+  // ─── LAYOUT: contenedor principal con scroll, sin altura fija ───
   return (
     <AppLayout title="Dashboard Financiero">
       <div
@@ -363,11 +358,12 @@ export default function Dashboard() {
           background: C.pageBg,
           margin: -24,
           padding: 16,
-          display: "grid",
-          gridTemplateRows: "auto auto auto 1fr",
+          minHeight: "calc(100vh - 56px)",
+          // SIN height fijo, SIN overflow:hidden → permite scroll en pantallas pequeñas
+          // En pantallas grandes se ve todo en una página
+          display: "flex",
+          flexDirection: "column",
           gap: 8,
-          height: "calc(100vh - 56px)",
-          overflow: "hidden",
         }}
       >
         {isLoading ? (
@@ -457,8 +453,16 @@ export default function Dashboard() {
               />
             </div>
 
-            {/* ROW 3 — Main chart + Balance */}
-            <div className="grid gap-3" style={{ gridTemplateColumns: "62fr 38fr", flex: "1 1 auto", minHeight: 0 }}>
+            {/* ROW 3 — Main chart + Balance (altura fija en desktop, auto en pequeño) */}
+            <div
+              className="grid gap-3"
+              style={{
+                gridTemplateColumns: "62fr 38fr",
+                // Altura mínima garantizada; en pantallas grandes ocupa más espacio
+                minHeight: 320,
+                height: "clamp(320px, calc(100vh - 420px), 480px)",
+              }}
+            >
               {/* Main area chart */}
               <div
                 style={{
@@ -468,7 +472,6 @@ export default function Dashboard() {
                   padding: 12,
                   display: "flex",
                   flexDirection: "column",
-                  height: "100%",
                   minHeight: 0,
                 }}
               >
@@ -573,6 +576,7 @@ export default function Dashboard() {
                     borderRadius: 8,
                     padding: 12,
                     flex: "1 1 auto",
+                    minHeight: 0,
                   }}
                 >
                   <div
@@ -610,6 +614,7 @@ export default function Dashboard() {
                     borderRadius: 8,
                     padding: 12,
                     flex: "1 1 auto",
+                    minHeight: 0,
                   }}
                 >
                   <div
@@ -673,14 +678,12 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* ROW 4 — Bottom panels */}
+            {/* ROW 4 — Bottom panels (altura automática, nunca se corta) */}
             <div
               className="grid gap-3"
               style={{
                 gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                flex: "0 0 240px",
-                marginBottom: 0,
-                alignItems: "stretch",
+                // Sin altura fija — crece según contenido
               }}
             >
               {/* Mini area chart */}
@@ -692,7 +695,6 @@ export default function Dashboard() {
                   padding: 12,
                   display: "flex",
                   flexDirection: "column",
-                  height: "100%",
                 }}
               >
                 <div
@@ -707,7 +709,8 @@ export default function Dashboard() {
                 >
                   Ingresos por mes
                 </div>
-                <div style={{ flex: 1, minHeight: 120 }}>
+                {/* Altura fija para el chart — no depende del padre */}
+                <div style={{ height: 160 }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={chartData} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
                       <defs>
@@ -742,7 +745,6 @@ export default function Dashboard() {
                   border: `0.5px solid ${C.cardBorder}`,
                   borderRadius: 8,
                   padding: 14,
-                  height: "100%",
                   display: "flex",
                   flexDirection: "column",
                 }}
@@ -765,7 +767,7 @@ export default function Dashboard() {
                   <DistRow label="G. Financieros" pct={dist.fin} color={C.negative} />
                   <DistRow label="Costos de venta" pct={dist.costos} color={C.warning} />
                 </div>
-                <div style={{ fontSize: 11, color: C.textDim, marginTop: 4 }}>
+                <div style={{ fontSize: 11, color: C.textDim, marginTop: 8 }}>
                   Total egresos: {formatM(Math.max(0, totals.ingresos - totals.utilOper))}
                 </div>
               </div>
@@ -777,7 +779,6 @@ export default function Dashboard() {
                   border: `0.5px solid ${C.cardBorder}`,
                   borderRadius: 8,
                   padding: 12,
-                  height: "100%",
                   display: "flex",
                   flexDirection: "column",
                 }}
@@ -983,16 +984,16 @@ function GaugeCard({
       style={{
         background: C.card2Bg,
         borderRadius: 8,
-        padding: 14,
+        padding: "10px 14px",
         textAlign: "center",
         border: `0.5px solid ${C.card2Border}`,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "space-between",
+        justifyContent: "center",
       }}
     >
-      <svg width="90" height="52" viewBox="0 0 80 48" style={{ display: "block", margin: "0 auto" }}>
+      <svg width="80" height="48" viewBox="0 0 80 48" style={{ display: "block", margin: "0 auto" }}>
         <path
           d={`M ${cx - r},${cy} A ${r},${r} 0 0,1 ${cx + r},${cy}`}
           fill="none"
@@ -1015,11 +1016,11 @@ function GaugeCard({
           fill={color}
         />
       </svg>
-      <div style={{ fontSize: 18, fontWeight: 700, color, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
+      <div style={{ fontSize: 16, fontWeight: 700, color, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
         {safe.toFixed(1)}
         {unit}
       </div>
-      <div style={{ fontSize: 10, color: C.textDim, marginTop: 4 }}>{label}</div>
+      <div style={{ fontSize: 10, color: C.textDim, marginTop: 2 }}>{label}</div>
     </div>
   );
 }
