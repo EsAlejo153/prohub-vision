@@ -117,3 +117,35 @@ export async function cargarAuxiliarEsf(params: {
   if (data && !data.ok) throw new Error(data.error ?? "Error al cargar ESF");
   return data;
 }
+export interface EsfTerceroRow {
+  compania: string;
+  año_mes_num: number;
+  orden_cuenta: number;
+  plan_cuenta_key: string;
+  concepto_cuenta: string;
+  signo: number;
+  cuenta_mov: string;
+  tercero_key: string;
+  nombre_tercero: string | null;
+  valor_presentacion: number;
+}
+
+export function useEsfTerceros(filtros: { año_mes_num: number | null; compania: string }) {
+  return useQuery({
+    queryKey: ["esf-terceros", filtros],
+    enabled: !!filtros.año_mes_num,
+    queryFn: async (): Promise<EsfTerceroRow[]> => {
+      if (!filtros.año_mes_num) return [];
+      let q = supabase
+        .from("v_esf_terceros")
+        .select("*")
+        .eq("año_mes_num", filtros.año_mes_num)
+        .order("orden_cuenta", { ascending: true })
+        .order("valor_presentacion", { ascending: false });
+      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+      const { data, error } = await q.limit(2000);
+      if (error) throw error;
+      return (data ?? []) as EsfTerceroRow[];
+    },
+  });
+}
