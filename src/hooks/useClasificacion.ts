@@ -34,10 +34,7 @@ export function useAlertaCuentas() {
   return useQuery({
     queryKey: ["alerta_cuentas"],
     queryFn: async (): Promise<AlertaCuentas> => {
-      const { data, error } = await supabase
-        .from("v_alerta_cuentas")
-        .select("*")
-        .maybeSingle();
+      const { data, error } = await supabase.from("v_alerta_cuentas").select("*").maybeSingle();
       if (error) throw error;
       return (data ?? {
         pendientes_eri: 0,
@@ -83,9 +80,7 @@ export function useCuentasSinClasificar(filtros: CuentasFiltros) {
       if (filtros.search) {
         const s = filtros.search.toLowerCase();
         rows = rows.filter(
-          (r) =>
-            r.cuenta_key?.toLowerCase().includes(s) ||
-            r.nombre_cuenta?.toLowerCase().includes(s),
+          (r) => r.cuenta_key?.toLowerCase().includes(s) || r.nombre_cuenta?.toLowerCase().includes(s),
         );
       }
       return rows;
@@ -147,10 +142,7 @@ export async function clasificarCuenta(params: {
 }
 
 export async function actualizarNombreCC(codigo: string, nombre_display: string | null) {
-  const { error } = await supabase
-    .from("dim_centros_costo")
-    .update({ nombre_display })
-    .eq("codigo", codigo);
+  const { error } = await supabase.from("dim_centros_costo").update({ nombre_display }).eq("codigo", codigo);
   if (error) throw error;
 }
 
@@ -160,4 +152,101 @@ export async function agregarCentroCosto(codigo: string, nombre_display: string)
     nombre_display,
   });
   if (error) throw error;
+}
+// ─── Tipos para edición ───────────────────────────────────────────────────────
+export interface EditarCuentaParams {
+  cuenta_key: string;
+  grupo_titulo: string;
+  tipo_gasto?: string | null;
+  detalle_gasto?: string | null;
+  nombre_cuenta_jerarquia?: string | null;
+}
+
+export interface TipoGastoRow {
+  tipo_gasto: string;
+  orden_tipo: number;
+}
+
+export interface DetalleGastoRow {
+  detalle_gasto: string;
+  tipo_gasto: string;
+  orden_detalle: number;
+}
+
+// ─── Hook: tipos de gasto (nivel primario) ────────────────────────────────────
+export function useTiposGasto() {
+  return useQuery({
+    queryKey: ["tipos_gasto"],
+    queryFn: async (): Promise<TipoGastoRow[]> => {
+      const { data, error } = await supabase
+        .from("plan_gastos_jerarquia")
+        .select("tipo_gasto, orden_tipo")
+        .order("orden_tipo", { ascending: true });
+      if (error) throw error;
+      const seen = new Set<string>();
+      const out: TipoGastoRow[] = [];
+      for (const r of (data ?? []) as TipoGastoRow[]) {
+        if (!seen.has(r.tipo_gasto)) {
+          seen.add(r.tipo_gasto);
+          out.push(r);
+        }
+      }
+      return out;
+    },
+  });
+}
+
+// ─── Hook: detalles de gasto (nivel secundario) ───────────────────────────────
+export function useDetallesGasto() {
+  return useQuery({
+    queryKey: ["detalles_gasto"],
+    queryFn: async (): Promise<DetalleGastoRow[]> => {
+      const { data, error } = await supabase
+        .from("plan_gastos_jerarquia")
+        .select("detalle_gasto, tipo_gasto, orden_detalle")
+        .order("orden_detalle", { ascending: true });
+      if (error) throw error;
+      const seen = new Set<string>();
+      const out: DetalleGastoRow[] = [];
+      for (const r of (data ?? []) as DetalleGastoRow[]) {
+        if (!seen.has(`${r.tipo_gasto}||${r.detalle_gasto}`)) {
+          seen.add(`${r.tipo_gasto}||${r.detalle_gasto}`);
+          out.push(r);
+        }
+      }
+      return out;
+    },
+  });
+}
+
+// ─── Hook: jerarquía actual de una cuenta clase 5 ────────────────────────────
+export function useJerarquiaCuenta(cuenta_key: string | null) {
+  return useQuery({
+    queryKey: ["jerarquia_cuenta", cuenta_key],
+    enabled: !!cuenta_key,
+    queryFn: async (): Promise<(DetalleGastoRow & { nombre_cuenta: string }) | null> => {
+      if (!cuenta_key) return null;
+      const { data, error } = await supabase
+        .from("plan_gastos_jerarquia")
+        .select("tipo_gasto, detalle_gasto, nombre_cuenta, orden_tipo, orden_detalle")
+        .eq("cuenta", cuenta_key)
+        .maybeSingle();
+      if (error) throw error;
+      return data as any;
+    },
+  });
+}
+
+// ─── Función: editar cuenta ───────────────────────────────────────────────────
+export async function editarCuenta(params: EditarCuentaParams) {
+  const { data, error } = await supabase.rpc("fn_editar_cuenta", {
+    p_cuenta_key: params.cuenta_key,
+    p_grupo_titulo: params.grupo_titulo,
+    p_tipo_gasto: params.tipo_gasto ?? null,
+    p_detalle_gasto: params.detalle_gasto ?? null,
+    p_nombre_cuenta_jerarquia: params.nombre_cuenta_jerarquia ?? null,
+  });
+  if (error) throw error;
+  if (data && !data.ok) throw new Error(data.error ?? "Error al editar cuenta");
+  return data;
 }
