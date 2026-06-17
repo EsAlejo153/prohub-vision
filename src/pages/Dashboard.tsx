@@ -1,23 +1,10 @@
 import AppLayout from "@/components/layout/AppLayout";
-import {
-  ComposedChart,
-  AreaChart,
-  Area,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
+import { ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
 import { useFiltros } from "@/context/FiltrosContext";
-import {
-  useKpisMesAMes,
-  useDistribucionGastos,
-  useTopCuentas,
-  useBalanceFallback,
-  type KpiMesRow,
-} from "@/hooks/useDashboardPremium";
+import { useKpisMesAMes, useDistribucionGastos, useBalanceFallback, type KpiMesRow } from "@/hooks/useDashboardPremium";
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/lib/external-supabase";
+import { buildPeriodoRange } from "@/context/FiltrosContext";
 import { useMemo } from "react";
 import { AlertCircle } from "lucide-react";
 
@@ -59,7 +46,7 @@ const formatPctV = (val: number | null | undefined) => {
 const deltaArrow = (v: number | null | undefined) => (v == null ? "=" : v >= 0 ? "↑" : "↓");
 const deltaColor = (v: number | null | undefined) => (v == null ? C.textDim : v >= 0 ? C.positive : C.negative);
 
-// ===== Smooth sparkline =====
+// ===== Sparkline =====
 function smoothPath(points: Array<[number, number]>): string {
   if (points.length === 0) return "";
   if (points.length === 1) return `M ${points[0][0]} ${points[0][1]}`;
@@ -84,11 +71,10 @@ function Sparkline({ values, color, gradId }: { values: number[]; color: string;
   const h = 36;
   const pad = 2;
   const max = Math.max(...values.map((v) => Math.abs(v))) || 1;
-  const points: Array<[number, number]> = values.map((v, i) => {
-    const x = (i / (values.length - 1)) * w;
-    const y = h - ((v / max) * (h / 2 - pad) + h / 2);
-    return [x, y];
-  });
+  const points: Array<[number, number]> = values.map((v, i) => [
+    (i / (values.length - 1)) * w,
+    h - ((v / max) * (h / 2 - pad) + h / 2),
+  ]);
   const linePath = smoothPath(points);
   const areaPath = `${linePath} L ${w} ${h} L 0 ${h} Z`;
   return (
@@ -176,6 +162,7 @@ function HeroCard({
   );
 }
 
+// ===== Ratio Card =====
 function RatioCard({
   label,
   value,
@@ -242,34 +229,484 @@ function EmptyMsg() {
   );
 }
 
+// ===== Hook: Cartera & Disponible desde v_esf_resumida =====
+function useCarteraDisponible(filtros: any) {
+  return useQuery({
+    queryKey: ["cartera_disponible", filtros],
+    queryFn: async () => {
+      // Detectar último mes con datos de balance
+      let qMes = supabase
+        .from("v_esf_resumida")
+        .select("año_mes_num")
+        .not("año_mes_num", "is", null)
+        .order("año_mes_num", { ascending: false })
+        .limit(1);
+      if (filtros.compania !== "Todas") qMes = qMes.eq("compania", filtros.compania);
+      const range = buildPeriodoRange(filtros.año, filtros.mes);
+      if (range) qMes = qMes.lte("año_mes_num", range.max).gte("año_mes_num", range.min);
+      const { data: mesData } = await qMes;
+      const ultimoMes = (mesData?.[0] as any)?.año_mes_num;
+      if (!ultimoMes) return { caja: 0, bancos: 0, clientes: 0, ultimoMes: null };
+
+      let q = supabase
+        .from("v_esf_resumida")
+        .select("concepto, valor_presentacion, compania")
+        .eq("año_mes_num", ultimoMes)
+        .eq("nivel", "Cuenta")
+        .in("concepto", ["CAJA", "BANCOS", "CUENTAS DE AHORRO", "CLIENTES"]);
+      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+      const { data, error } = await q;
+      if (error) throw error;
+
+      const rows = (data ?? []) as { concepto: string; valor_presentacion: number | null }[];
+      const sumOf = (concepto: string) =>
+        rows.filter((r) => r.concepto === concepto).reduce((s, r) => s + (Number(r.valor_presentacion) || 0), 0);
+
+      return {
+        caja: sumOf("CAJA"),
+        bancos: sumOf("BANCOS") + sumOf("CUENTAS DE AHORRO"),
+        clientes: sumOf("CLIENTES"),
+        ultimoMes,
+      };
+    },
+  });
+}
+
+// ===== Hook: Gastos por grupo PYG desde v_eri_resumida =====
+function useGastosPorGrupoPyg(filtros: any) {
+  return useQuery({
+    queryKey: ["gastos_grupo_pyg", filtros],
+    queryFn: async () => {
+      const GRUPOS_GASTO = [
+        "GASTOS DE ADMINISTRACIÓN",
+        "GASTOS OPERACIONALES",
+        "GASTOS FINANCIEROS",
+        "GASTOS NO OPERACIONALES",
+      ];
+
+      let q = supabase
+        .from("v_eri_resumida")
+        .select("grupo_titulo, valor_pyg, compania, año_mes_num")
+        .in("grupo_titulo", GRUPOS_GASTO)
+        .eq("nivel", "Cuenta");
+
+      const range = buildPeriodoRange(filtros.año, filtros.mes);
+      if (range) q = q.gte("año_mes_num", range.min).lte("año_mes_num", range.max);
+
+      if (filtros.compania === "Todas") {
+        // Consolidar ambas compañías
+      } else {
+        q = q.eq("compania", filtros.compania);
+      }
+
+      const { data, error } = await q.limit(5000);
+      if (error) throw error;
+
+      // Agrupar por grupo_titulo sumando valor_pyg
+      const map = new Map<string, number>();
+      for (const r of (data ?? []) as any[]) {
+        const g = r.grupo_titulo ?? "OTROS";
+        const v = Math.abs(Number(r.valor_pyg) || 0);
+        map.set(g, (map.get(g) ?? 0) + v);
+      }
+
+      // También traer ingresos totales para calcular %
+      let qIng = supabase
+        .from("v_eri_resumida")
+        .select("valor_pyg")
+        .eq("grupo_titulo", "INGRESOS OPERACIONALES")
+        .eq("nivel", "Cuenta");
+      if (range) qIng = qIng.gte("año_mes_num", range.min).lte("año_mes_num", range.max);
+      if (filtros.compania !== "Todas") qIng = qIng.eq("compania", filtros.compania);
+      const { data: ingData } = await qIng.limit(5000);
+      const totalIngresos = ((ingData ?? []) as any[]).reduce((s, r) => s + Math.abs(Number(r.valor_pyg) || 0), 0);
+
+      const colores: Record<string, string> = {
+        "GASTOS DE ADMINISTRACIÓN": C.blue,
+        "GASTOS OPERACIONALES": C.indigo,
+        "GASTOS FINANCIEROS": C.negative,
+        "GASTOS NO OPERACIONALES": C.warning,
+      };
+
+      const labels: Record<string, string> = {
+        "GASTOS DE ADMINISTRACIÓN": "G. Administración",
+        "GASTOS OPERACIONALES": "G. Operacionales",
+        "GASTOS FINANCIEROS": "G. Financieros",
+        "GASTOS NO OPERACIONALES": "G. No Operacionales",
+      };
+
+      return GRUPOS_GASTO.map((g) => ({
+        grupo: g,
+        label: labels[g] ?? g,
+        total: map.get(g) ?? 0,
+        pct: totalIngresos > 0 ? ((map.get(g) ?? 0) / totalIngresos) * 100 : 0,
+        color: colores[g] ?? C.textDim,
+      }));
+    },
+  });
+}
+
+// ===== GaugeCard =====
+function GaugeCard({
+  label,
+  value,
+  unit,
+  min,
+  max,
+  threshold,
+  colorOk,
+  colorBad,
+  invert,
+}: {
+  label: string;
+  value: number;
+  unit: string;
+  min: number;
+  max: number;
+  threshold: number;
+  colorOk: string;
+  colorBad: string;
+  invert?: boolean;
+}) {
+  const safe = Number.isFinite(value) ? value : 0;
+  const pct = Math.min(Math.max((safe - min) / (max - min), 0), 1);
+  const angle = pct * 180 - 90;
+  const isGood = invert ? safe >= threshold : safe <= threshold;
+  const color = isGood ? colorOk : colorBad;
+  const r = 28;
+  const cx = 36;
+  const cy = 38;
+  const arcLen = Math.PI * r;
+  return (
+    <div
+      style={{
+        background: C.card2Bg,
+        borderRadius: 8,
+        padding: "8px 10px",
+        textAlign: "center",
+        border: `0.5px solid ${C.card2Border}`,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <svg width="72" height="42" viewBox="0 0 72 42" style={{ display: "block", margin: "0 auto" }}>
+        <path
+          d={`M ${cx - r},${cy} A ${r},${r} 0 0,1 ${cx + r},${cy}`}
+          fill="none"
+          stroke="#1a2332"
+          strokeWidth={5}
+          strokeLinecap="round"
+        />
+        <path
+          d={`M ${cx - r},${cy} A ${r},${r} 0 0,1 ${cx + r},${cy}`}
+          fill="none"
+          stroke={color}
+          strokeWidth={5}
+          strokeLinecap="round"
+          strokeDasharray={`${pct * arcLen} ${arcLen}`}
+        />
+        <circle
+          cx={cx + r * Math.cos((angle * Math.PI) / 180)}
+          cy={cy - r * Math.sin((angle * Math.PI) / 180)}
+          r={3}
+          fill={color}
+        />
+      </svg>
+      <div
+        style={{
+          fontSize: 15,
+          fontWeight: 700,
+          color,
+          marginTop: 0,
+          fontVariantNumeric: "tabular-nums",
+          lineHeight: 1,
+        }}
+      >
+        {safe.toFixed(1)}
+        {unit}
+      </div>
+      <div style={{ fontSize: 9, color: C.textDim, marginTop: 2 }}>{label}</div>
+    </div>
+  );
+}
+
+function BalanceRow({
+  label,
+  value,
+  valueColor,
+  badge,
+  badgeColor,
+}: {
+  label: string;
+  value: string;
+  valueColor?: string;
+  badge: string;
+  badgeColor: string;
+}) {
+  return (
+    <div className="flex items-center justify-between py-2">
+      <span style={{ fontSize: 12, color: C.textMuted, fontWeight: 500 }}>{label}</span>
+      <div className="flex items-center gap-2">
+        <span
+          style={{
+            fontSize: 17,
+            color: valueColor ?? C.textPrimary,
+            fontVariantNumeric: "tabular-nums",
+            fontWeight: 600,
+          }}
+        >
+          {value}
+        </span>
+        <span
+          style={{
+            fontSize: 10,
+            color: badgeColor,
+            background: `${badgeColor}1f`,
+            border: `0.5px solid ${badgeColor}55`,
+            padding: "2px 7px",
+            borderRadius: 999,
+            fontVariantNumeric: "tabular-nums",
+          }}
+        >
+          {badge}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function StructureBar({ activos, pasivos, patrimonio }: { activos: number; pasivos: number; patrimonio: number }) {
+  const denom = Math.abs(activos) || Math.abs(pasivos) + Math.abs(patrimonio) || 1;
+  const pasivosPct = (Math.abs(pasivos) / denom) * 100;
+  const patrimonioPct = Math.max(0, (patrimonio / denom) * 100);
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 9, color: C.textDim }}>
+        <span>Estructura de financiación</span>
+        <span style={{ fontVariantNumeric: "tabular-nums" }}>{pasivosPct.toFixed(1)}% deuda</span>
+      </div>
+      <div style={{ height: 6, borderRadius: 4, background: "#1a2332", overflow: "hidden", display: "flex" }}>
+        <div style={{ width: `${Math.min(pasivosPct, 100)}%`, background: C.negative, transition: "width 0.5s" }} />
+        <div style={{ width: `${Math.min(patrimonioPct, 100)}%`, background: C.positive, transition: "width 0.5s" }} />
+      </div>
+      <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
+        <span style={{ fontSize: 9, color: C.negative }}>● Pasivos</span>
+        <span style={{ fontSize: 9, color: C.positive }}>● Patrimonio</span>
+      </div>
+    </div>
+  );
+}
+
+function DistRow({ label, pct, color }: { label: string; pct: number; color: string }) {
+  const safe = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
+  return (
+    <div style={{ marginBottom: 9 }}>
+      <div className="flex items-center justify-between" style={{ color: C.textMuted }}>
+        <span style={{ fontSize: 11, fontWeight: 500 }}>{label}</span>
+        <span style={{ color: C.textPrimary, fontSize: 12, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
+          {safe.toFixed(1)}%
+        </span>
+      </div>
+      <div style={{ marginTop: 3, height: 6, background: C.cardBorder, borderRadius: 2, overflow: "hidden" }}>
+        <div style={{ width: `${safe}%`, height: "100%", background: color, borderRadius: 2 }} />
+      </div>
+    </div>
+  );
+}
+
+// ===== Tarjeta Cartera & Disponible =====
+function CarteraCard({ filtros }: { filtros: any }) {
+  const { data } = useCarteraDisponible(filtros);
+  const disponible = (data?.caja ?? 0) + (data?.bancos ?? 0);
+  const cartera = data?.clientes ?? 0;
+  const total = disponible + cartera || 1;
+  const dispPct = (disponible / total) * 100;
+  const cartPct = (cartera / total) * 100;
+
+  const mesLabel = data?.ultimoMes
+    ? `${String(data.ultimoMes).slice(4, 6)}/${String(data.ultimoMes).slice(0, 4)}`
+    : "—";
+
+  return (
+    <div
+      style={{
+        background: C.cardBg,
+        border: `0.5px solid ${C.cardBorder}`,
+        borderRadius: 8,
+        padding: 14,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div
+          style={{
+            fontSize: 12,
+            color: C.textMuted,
+            fontWeight: 600,
+            textTransform: "uppercase",
+            letterSpacing: "0.06em",
+          }}
+        >
+          Liquidez & Cartera
+        </div>
+        <span style={{ fontSize: 10, color: C.textDim }}>Al {mesLabel}</span>
+      </div>
+
+      {/* Disponible */}
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+          <span style={{ fontSize: 11, color: C.textMuted }}>Disponible (Caja + Bancos)</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: C.positive, fontVariantNumeric: "tabular-nums" }}>
+            {formatM(disponible)}
+          </span>
+        </div>
+        <div style={{ height: 6, background: C.cardBorder, borderRadius: 3, overflow: "hidden" }}>
+          <div
+            style={{ width: `${Math.min(dispPct, 100)}%`, height: "100%", background: C.positive, borderRadius: 3 }}
+          />
+        </div>
+        <div style={{ marginTop: 4, display: "flex", gap: 12 }}>
+          <div style={{ fontSize: 10, color: C.textDim }}>
+            Caja:{" "}
+            <span style={{ color: C.textMuted, fontVariantNumeric: "tabular-nums" }}>{formatM(data?.caja ?? 0)}</span>
+          </div>
+          <div style={{ fontSize: 10, color: C.textDim }}>
+            Bancos:{" "}
+            <span style={{ color: C.textMuted, fontVariantNumeric: "tabular-nums" }}>{formatM(data?.bancos ?? 0)}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Cartera */}
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+          <span style={{ fontSize: 11, color: C.textMuted }}>Cartera (Clientes)</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: C.warning, fontVariantNumeric: "tabular-nums" }}>
+            {formatM(cartera)}
+          </span>
+        </div>
+        <div style={{ height: 6, background: C.cardBorder, borderRadius: 3, overflow: "hidden" }}>
+          <div
+            style={{ width: `${Math.min(cartPct, 100)}%`, height: "100%", background: C.warning, borderRadius: 3 }}
+          />
+        </div>
+        <div style={{ marginTop: 4, fontSize: 10, color: C.textDim }}>
+          {cartPct.toFixed(1)}% del activo corriente líquido
+        </div>
+      </div>
+
+      {/* Ratio disponible/cartera */}
+      <div
+        style={{
+          borderTop: `0.5px solid ${C.cardBorder}`,
+          paddingTop: 8,
+          display: "flex",
+          justifyContent: "space-between",
+        }}
+      >
+        <span style={{ fontSize: 10, color: C.textDim }}>Total activo corriente líquido</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: C.textPrimary, fontVariantNumeric: "tabular-nums" }}>
+          {formatM(total === 1 ? 0 : total)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ===== Tarjeta Gastos por grupo PYG =====
+function GastosPygCard({ filtros, totalIngresos }: { filtros: any; totalIngresos: number }) {
+  const { data: grupos = [] } = useGastosPorGrupoPyg(filtros);
+  const totalGastos = grupos.reduce((s, g) => s + g.total, 0);
+
+  return (
+    <div
+      style={{
+        background: C.cardBg,
+        border: `0.5px solid ${C.cardBorder}`,
+        borderRadius: 8,
+        padding: 14,
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 12,
+          color: C.textMuted,
+          marginBottom: 10,
+          fontWeight: 600,
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+        }}
+      >
+        Gastos por categoría
+      </div>
+      <div style={{ flex: "1 1 auto" }}>
+        {grupos.map((g) => (
+          <div key={g.grupo} style={{ marginBottom: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 3 }}>
+              <span style={{ fontSize: 11, color: C.textMuted, fontWeight: 500 }}>{g.label}</span>
+              <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
+                <span style={{ fontSize: 11, color: C.textDim, fontVariantNumeric: "tabular-nums" }}>
+                  {g.pct.toFixed(1)}% ing.
+                </span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: g.color, fontVariantNumeric: "tabular-nums" }}>
+                  {formatM(g.total)}
+                </span>
+              </div>
+            </div>
+            <div style={{ height: 6, background: C.cardBorder, borderRadius: 2, overflow: "hidden" }}>
+              <div
+                style={{ width: `${Math.min(g.pct, 100)}%`, height: "100%", background: g.color, borderRadius: 2 }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div
+        style={{
+          borderTop: `0.5px solid ${C.cardBorder}`,
+          paddingTop: 8,
+          display: "flex",
+          justifyContent: "space-between",
+        }}
+      >
+        <span style={{ fontSize: 10, color: C.textDim }}>Total gastos acumulados</span>
+        <span style={{ fontSize: 12, fontWeight: 700, color: C.negative, fontVariantNumeric: "tabular-nums" }}>
+          {formatM(totalGastos)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ===== MAIN DASHBOARD =====
 export default function Dashboard() {
   const filtros = useFiltros();
   const { data: rows = [], isLoading } = useKpisMesAMes(filtros);
   const { data: distRows = [] } = useDistribucionGastos(filtros);
-  const { data: topRows = [] } = useTopCuentas(filtros);
 
   const last = rows.length ? rows[rows.length - 1] : null;
   const prevLabel = rows.length >= 2 ? rows[rows.length - 2].mes_label : null;
 
   const totals = useMemo(() => {
     const sum = (k: keyof KpiMesRow) => rows.reduce((s, r) => s + (Number(r[k]) || 0), 0);
-    const lastRow = rows.length ? rows[rows.length - 1] : null;
     return {
       ingresos: sum("ingresos"),
       utilOper: sum("utilidad_operacional"),
       utilNeta: sum("utilidad_neta"),
-      activos: lastRow ? Number(lastRow.activos_totales) || 0 : 0,
-      pasivos: lastRow ? Number(lastRow.pasivos_totales) || 0 : 0,
-      patrimonio: lastRow ? Number(lastRow.patrimonio_total) || 0 : 0,
     };
   }, [rows]);
 
   const { data: balFallback } = useBalanceFallback(filtros, true);
-
   const balance =
     balFallback && (balFallback.activos !== 0 || balFallback.pasivos !== 0 || balFallback.patrimonio !== 0)
       ? balFallback
-      : { activos: totals.activos, pasivos: totals.pasivos, patrimonio: totals.patrimonio };
+      : { activos: 0, pasivos: 0, patrimonio: 0 };
 
   const sparks = useMemo(
     () => ({
@@ -285,7 +722,7 @@ export default function Dashboard() {
       rows.map((r) => ({
         mes_label: r.mes_label,
         ingresos: Number(r.ingresos) || 0,
-        margen_operacional_pct: Number(r.margen_operacional_pct) || 0,
+        margen_operacional_pct: Math.max(-100, Math.min(100, Number(r.margen_operacional_pct) || 0)),
       })),
     [rows],
   );
@@ -294,35 +731,10 @@ export default function Dashboard() {
     if (!distRows.length) return { adm: 0, oper: 0, fin: 0, costos: 0 };
     const avg = (k: keyof (typeof distRows)[number]) =>
       distRows.reduce((s, r) => s + (Number(r[k]) || 0), 0) / distRows.length;
-    return {
-      adm: avg("pct_adm"),
-      oper: avg("pct_oper"),
-      fin: avg("pct_fin"),
-      costos: avg("pct_costos"),
-    };
+    return { adm: avg("pct_adm"), oper: avg("pct_oper"), fin: avg("pct_fin"), costos: avg("pct_costos") };
   }, [distRows]);
 
-  const topAgg = useMemo(() => {
-    const map = new Map<string, { nombre: string; total: number }>();
-    for (const r of topRows as any[]) {
-      const key = r.cuenta_key ?? r.cuenta_codigo ?? r.nombre_cuenta ?? r.cuenta_nombre ?? "—";
-      const nombre = r.nombre_cuenta ?? r.cuenta_nombre ?? String(key);
-      const valor = Number(r.total ?? r.valor ?? 0) || 0;
-      const ex = map.get(key);
-      if (ex) ex.total += valor;
-      else map.set(key, { nombre, total: valor });
-    }
-    const arr = Array.from(map.values())
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 5);
-    const grand = arr.reduce((s, r) => s + r.total, 0);
-    return arr.map((r) => ({ ...r, part: grand > 0 ? (r.total / grand) * 100 : 0 }));
-  }, [topRows]);
-
   const valColor = (v: number) => (v < 0 ? C.negative : C.positive);
-  const sparkUtilOperColor = totals.utilOper < 0 ? C.negative : C.positive;
-  const sparkUtilNetaColor = totals.utilNeta < 0 ? C.negative : C.positive;
-
   const margenBruto = last?.margen_bruto_pct ?? 0;
   const margenNeto = last?.margen_neto_pct ?? 0;
   const costoIngreso = last?.costo_ingreso_pct ?? 0;
@@ -337,20 +749,10 @@ export default function Dashboard() {
   const roe = balance.patrimonio !== 0 ? safeDiv(totals.utilNeta, Math.abs(balance.patrimonio)) : (last?.roe_pct ?? 0);
   const roa = balance.activos !== 0 ? safeDiv(totals.utilNeta, Math.abs(balance.activos)) : (last?.roa_pct ?? 0);
 
-  const clampedChartData = useMemo(
-    () =>
-      chartData.map((d) => ({
-        ...d,
-        margen_operacional_pct: Math.max(-100, Math.min(100, d.margen_operacional_pct)),
-      })),
-    [chartData],
-  );
-
   const prev = rows.length >= 2 ? rows[rows.length - 2] : null;
   const dPct = (curr: number, prv: number | undefined) =>
     prv == null || prv === 0 ? null : ((curr - prv) / Math.abs(prv)) * 100;
 
-  // ─── LAYOUT: contenedor principal con scroll, sin altura fija ───
   return (
     <AppLayout title="Dashboard Financiero">
       <div
@@ -359,11 +761,10 @@ export default function Dashboard() {
           margin: -24,
           padding: 16,
           minHeight: "calc(100vh - 56px)",
-          // SIN height fijo, SIN overflow:hidden → permite scroll en pantallas pequeñas
-          // En pantallas grandes se ve todo en una página
           display: "flex",
           flexDirection: "column",
           gap: 8,
+          boxSizing: "border-box",
         }}
       >
         {isLoading ? (
@@ -378,7 +779,7 @@ export default function Dashboard() {
           </div>
         ) : (
           <>
-            {/* ROW 1 — Hero KPIs */}
+            {/* ── ROW 1: Hero KPIs ── */}
             <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
               <HeroCard
                 label="Ingresos operativos"
@@ -399,7 +800,7 @@ export default function Dashboard() {
                 prevLabel={prevLabel}
                 sub="Resultado operativo neto"
                 sparkValues={sparks.utilOper}
-                sparkColor={sparkUtilOperColor}
+                sparkColor={totals.utilOper < 0 ? C.negative : C.positive}
                 gradId="sp-uo"
               />
               <HeroCard
@@ -410,13 +811,13 @@ export default function Dashboard() {
                 prevLabel={prevLabel}
                 sub="Después de gastos financieros"
                 sparkValues={sparks.utilNeta}
-                sparkColor={sparkUtilNetaColor}
+                sparkColor={totals.utilNeta < 0 ? C.negative : C.positive}
                 gradId="sp-un"
               />
             </div>
 
-            {/* ROW 2 — Ratios */}
-            <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(5, minmax(0, 1fr))" }}>
+            {/* ── ROW 2: 4 Ratios (sin ROE duplicado) ── */}
+            <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(4, minmax(0, 1fr))" }}>
               <RatioCard
                 label="Margen bruto %"
                 value={formatPctV(margenBruto)}
@@ -438,13 +839,6 @@ export default function Dashboard() {
                 prevLabel={prevLabel}
               />
               <RatioCard
-                label="ROE"
-                value={formatPctV(roe)}
-                valueColor={roe < 0 ? C.negative : C.textPrimary}
-                delta={dPct(roe, prev?.roe_pct)}
-                prevLabel={prevLabel}
-              />
-              <RatioCard
                 label="EBITDA"
                 value={formatM(totals.utilOper)}
                 valueColor={valColor(totals.utilOper)}
@@ -453,17 +847,16 @@ export default function Dashboard() {
               />
             </div>
 
-            {/* ROW 3 — Main chart + Balance (altura fija en desktop, auto en pequeño) */}
+            {/* ── ROW 3: Gráfico principal + Balance & Solvencia ── */}
             <div
               className="grid gap-3"
               style={{
                 gridTemplateColumns: "62fr 38fr",
-                // Altura mínima garantizada; en pantallas grandes ocupa más espacio
-                minHeight: 320,
-                height: "clamp(320px, calc(100vh - 420px), 480px)",
+                height: "clamp(300px, calc(100vh - 400px), 460px)",
+                minHeight: 300,
               }}
             >
-              {/* Main area chart */}
+              {/* Gráfico */}
               <div
                 style={{
                   background: C.cardBg,
@@ -500,7 +893,7 @@ export default function Dashboard() {
                 </div>
                 <div style={{ flex: "1 1 auto", minHeight: 0 }}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={clampedChartData} margin={{ top: 6, right: 6, left: -8, bottom: 0 }}>
+                    <ComposedChart data={chartData} margin={{ top: 6, right: 6, left: -8, bottom: 0 }}>
                       <defs>
                         <linearGradient id="gradIngresos" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor={C.blue} stopOpacity={0.3} />
@@ -567,23 +960,23 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              {/* Balance stack */}
+              {/* Balance + Solvencia apilados */}
               <div className="flex flex-col gap-2" style={{ minHeight: 0 }}>
+                {/* Balance */}
                 <div
                   style={{
                     background: C.cardBg,
                     border: `0.5px solid ${C.cardBorder}`,
                     borderRadius: 8,
                     padding: 12,
-                    flex: "1 1 auto",
-                    minHeight: 0,
+                    flex: "0 0 auto",
                   }}
                 >
                   <div
                     style={{
                       fontSize: 12,
                       color: C.textMuted,
-                      marginBottom: 8,
+                      marginBottom: 4,
                       fontWeight: 600,
                       textTransform: "uppercase",
                       letterSpacing: "0.06em",
@@ -591,7 +984,12 @@ export default function Dashboard() {
                   >
                     Balance general
                   </div>
-                  <BalanceRow label="Activos" value={formatM(balance.activos)} badge="RC 0,8" badgeColor={C.warning} />
+                  <BalanceRow
+                    label="Activos"
+                    value={formatM(balance.activos)}
+                    badge="Activo total"
+                    badgeColor={C.blue}
+                  />
                   <BalanceRow
                     label="Pasivos"
                     value={formatM(balance.pasivos)}
@@ -607,6 +1005,8 @@ export default function Dashboard() {
                   />
                   <StructureBar activos={balance.activos} pasivos={balance.pasivos} patrimonio={balance.patrimonio} />
                 </div>
+
+                {/* Ratios Solvencia */}
                 <div
                   style={{
                     background: C.cardBg,
@@ -621,7 +1021,7 @@ export default function Dashboard() {
                     style={{
                       fontSize: 12,
                       color: C.textMuted,
-                      marginBottom: 8,
+                      marginBottom: 6,
                       fontWeight: 600,
                       textTransform: "uppercase",
                       letterSpacing: "0.06em",
@@ -629,7 +1029,7 @@ export default function Dashboard() {
                   >
                     Ratios de solvencia
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
                     <GaugeCard
                       label="Endeudamiento"
                       value={endeudamiento}
@@ -678,67 +1078,15 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* ROW 4 — Bottom panels (altura automática, nunca se corta) */}
-            <div
-              className="grid gap-3"
-              style={{
-                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                // Sin altura fija — crece según contenido
-              }}
-            >
-              {/* Mini area chart */}
-              <div
-                style={{
-                  background: C.cardBg,
-                  border: `0.5px solid ${C.cardBorder}`,
-                  borderRadius: 8,
-                  padding: 12,
-                  display: "flex",
-                  flexDirection: "column",
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: C.textMuted,
-                    marginBottom: 8,
-                    fontWeight: 600,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.06em",
-                  }}
-                >
-                  Ingresos por mes
-                </div>
-                {/* Altura fija para el chart — no depende del padre */}
-                <div style={{ height: 160 }}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={chartData} margin={{ top: 4, right: 0, left: 0, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="gradMini" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor={C.blue} stopOpacity={0.4} />
-                          <stop offset="95%" stopColor={C.blue} stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <Area
-                        type="monotone"
-                        dataKey="ingresos"
-                        stroke={C.blue}
-                        strokeWidth={2}
-                        fill="url(#gradMini)"
-                        dot={false}
-                      />
-                      <XAxis
-                        dataKey="mes_label"
-                        tick={{ fontSize: 8, fill: "#4a5568" }}
-                        axisLine={false}
-                        tickLine={false}
-                      />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
+            {/* ── ROW 4: Liquidez & Cartera | Gastos por categoría PYG | Distribución % ── */}
+            <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+              {/* Tarjeta 1: Liquidez & Cartera */}
+              <CarteraCard filtros={filtros} />
 
-              {/* Distribución gastos */}
+              {/* Tarjeta 2: Gastos por categoría PYG */}
+              <GastosPygCard filtros={filtros} totalIngresos={totals.ingresos} />
+
+              {/* Tarjeta 3: Distribución de gastos % */}
               <div
                 style={{
                   background: C.cardBg,
@@ -753,7 +1101,7 @@ export default function Dashboard() {
                   style={{
                     fontSize: 12,
                     color: C.textMuted,
-                    marginBottom: 8,
+                    marginBottom: 10,
                     fontWeight: 600,
                     textTransform: "uppercase",
                     letterSpacing: "0.06em",
@@ -767,260 +1115,26 @@ export default function Dashboard() {
                   <DistRow label="G. Financieros" pct={dist.fin} color={C.negative} />
                   <DistRow label="Costos de venta" pct={dist.costos} color={C.warning} />
                 </div>
-                <div style={{ fontSize: 11, color: C.textDim, marginTop: 8 }}>
-                  Total egresos: {formatM(Math.max(0, totals.ingresos - totals.utilOper))}
-                </div>
-              </div>
-
-              {/* Top cuentas */}
-              <div
-                style={{
-                  background: C.cardBg,
-                  border: `0.5px solid ${C.cardBorder}`,
-                  borderRadius: 8,
-                  padding: 12,
-                  display: "flex",
-                  flexDirection: "column",
-                }}
-              >
                 <div
                   style={{
-                    fontSize: 12,
-                    color: C.textMuted,
-                    marginBottom: 8,
-                    fontWeight: 600,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.06em",
+                    borderTop: `0.5px solid ${C.cardBorder}`,
+                    paddingTop: 8,
+                    display: "flex",
+                    justifyContent: "space-between",
                   }}
                 >
-                  Top cuentas de ingreso
+                  <span style={{ fontSize: 10, color: C.textDim }}>Total egresos acumulados</span>
+                  <span
+                    style={{ fontSize: 12, fontWeight: 700, color: C.textPrimary, fontVariantNumeric: "tabular-nums" }}
+                  >
+                    {formatM(Math.max(0, totals.ingresos - totals.utilOper))}
+                  </span>
                 </div>
-                {topAgg.length === 0 ? (
-                  <div style={{ fontSize: 10, color: C.textDim, padding: "8px 0" }}>Sin datos</div>
-                ) : (
-                  topAgg.map((r, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "1.4fr 1fr auto auto",
-                        gap: 8,
-                        alignItems: "center",
-                        padding: "8px 0",
-                        borderBottom: i < topAgg.length - 1 ? `0.5px solid #0d1525` : "none",
-                        fontSize: 11,
-                      }}
-                    >
-                      <span
-                        style={{
-                          color: "#a0aabf",
-                          fontSize: 11,
-                          fontWeight: 500,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {r.nombre}
-                      </span>
-                      <div
-                        style={{ height: 3, background: "#0d1525", borderRadius: 2, overflow: "hidden", marginTop: 3 }}
-                      >
-                        <div
-                          style={{
-                            width: `${Math.min(100, Math.max(0, r.part))}%`,
-                            height: "100%",
-                            background: C.blue,
-                            borderRadius: 2,
-                          }}
-                        />
-                      </div>
-                      <span
-                        style={{ color: "#f0f4ff", fontSize: 13, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}
-                      >
-                        {formatM(r.total)}
-                      </span>
-                      <span
-                        style={{
-                          color: "#6b7a99",
-                          fontSize: 11,
-                          fontVariantNumeric: "tabular-nums",
-                          minWidth: 36,
-                          textAlign: "right",
-                        }}
-                      >
-                        {r.part.toFixed(1)}%
-                      </span>
-                    </div>
-                  ))
-                )}
               </div>
             </div>
           </>
         )}
       </div>
     </AppLayout>
-  );
-}
-
-// ===== Sub-components =====
-
-function BalanceRow({
-  label,
-  value,
-  valueColor,
-  badge,
-  badgeColor,
-}: {
-  label: string;
-  value: string;
-  valueColor?: string;
-  badge: string;
-  badgeColor: string;
-}) {
-  return (
-    <div className="flex items-center justify-between py-2">
-      <span style={{ fontSize: 12, color: C.textMuted, fontWeight: 500 }}>{label}</span>
-      <div className="flex items-center gap-2">
-        <span
-          style={{
-            fontSize: 18,
-            color: valueColor ?? C.textPrimary,
-            fontVariantNumeric: "tabular-nums",
-            fontWeight: 600,
-          }}
-        >
-          {value}
-        </span>
-        <span
-          style={{
-            fontSize: 10,
-            color: badgeColor,
-            background: `${badgeColor}1f`,
-            border: `0.5px solid ${badgeColor}55`,
-            padding: "2px 7px",
-            borderRadius: 999,
-            fontVariantNumeric: "tabular-nums",
-          }}
-        >
-          {badge}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function DistRow({ label, pct, color }: { label: string; pct: number; color: string }) {
-  const safe = Math.max(0, Math.min(100, Number.isFinite(pct) ? pct : 0));
-  return (
-    <div style={{ marginBottom: 10 }}>
-      <div className="flex items-center justify-between" style={{ color: C.textMuted }}>
-        <span style={{ fontSize: 11, fontWeight: 500 }}>{label}</span>
-        <span style={{ color: C.textPrimary, fontSize: 13, fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
-          {safe.toFixed(1)}%
-        </span>
-      </div>
-      <div style={{ marginTop: 4, height: 8, background: C.cardBorder, borderRadius: 2, overflow: "hidden" }}>
-        <div style={{ width: `${safe}%`, height: "100%", background: color, borderRadius: 2 }} />
-      </div>
-    </div>
-  );
-}
-
-function StructureBar({ activos, pasivos, patrimonio }: { activos: number; pasivos: number; patrimonio: number }) {
-  const denom = Math.abs(activos) || Math.abs(pasivos) + Math.abs(patrimonio) || 1;
-  const pasivosPct = (Math.abs(pasivos) / denom) * 100;
-  const patrimonioPct = Math.max(0, (patrimonio / denom) * 100);
-  return (
-    <div style={{ marginTop: 10 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 9, color: C.textDim }}>
-        <span>Estructura de financiación</span>
-        <span style={{ fontVariantNumeric: "tabular-nums" }}>{pasivosPct.toFixed(1)}% deuda</span>
-      </div>
-      <div style={{ height: 8, borderRadius: 4, background: "#1a2332", overflow: "hidden", display: "flex" }}>
-        <div style={{ width: `${Math.min(pasivosPct, 100)}%`, background: C.negative, transition: "width 0.5s" }} />
-        <div style={{ width: `${Math.min(patrimonioPct, 100)}%`, background: C.positive, transition: "width 0.5s" }} />
-      </div>
-      <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
-        <span style={{ fontSize: 9, color: C.negative }}>● Pasivos</span>
-        <span style={{ fontSize: 9, color: C.positive }}>● Patrimonio</span>
-      </div>
-    </div>
-  );
-}
-
-function GaugeCard({
-  label,
-  value,
-  unit,
-  min,
-  max,
-  threshold,
-  colorOk,
-  colorBad,
-  invert,
-}: {
-  label: string;
-  value: number;
-  unit: string;
-  min: number;
-  max: number;
-  threshold: number;
-  colorOk: string;
-  colorBad: string;
-  invert?: boolean;
-}) {
-  const safe = Number.isFinite(value) ? value : 0;
-  const pct = Math.min(Math.max((safe - min) / (max - min), 0), 1);
-  const angle = pct * 180 - 90;
-  const isGood = invert ? safe >= threshold : safe <= threshold;
-  const color = isGood ? colorOk : colorBad;
-  const r = 32;
-  const cx = 40;
-  const cy = 42;
-  const arcLen = Math.PI * r;
-  return (
-    <div
-      style={{
-        background: C.card2Bg,
-        borderRadius: 8,
-        padding: "10px 14px",
-        textAlign: "center",
-        border: `0.5px solid ${C.card2Border}`,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-    >
-      <svg width="80" height="48" viewBox="0 0 80 48" style={{ display: "block", margin: "0 auto" }}>
-        <path
-          d={`M ${cx - r},${cy} A ${r},${r} 0 0,1 ${cx + r},${cy}`}
-          fill="none"
-          stroke="#1a2332"
-          strokeWidth={6}
-          strokeLinecap="round"
-        />
-        <path
-          d={`M ${cx - r},${cy} A ${r},${r} 0 0,1 ${cx + r},${cy}`}
-          fill="none"
-          stroke={color}
-          strokeWidth={6}
-          strokeLinecap="round"
-          strokeDasharray={`${pct * arcLen} ${arcLen}`}
-        />
-        <circle
-          cx={cx + r * Math.cos((angle * Math.PI) / 180)}
-          cy={cy - r * Math.sin((angle * Math.PI) / 180)}
-          r={3.5}
-          fill={color}
-        />
-      </svg>
-      <div style={{ fontSize: 16, fontWeight: 700, color, marginTop: 2, fontVariantNumeric: "tabular-nums" }}>
-        {safe.toFixed(1)}
-        {unit}
-      </div>
-      <div style={{ fontSize: 10, color: C.textDim, marginTop: 2 }}>{label}</div>
-    </div>
   );
 }
