@@ -55,19 +55,33 @@ export interface GastoTerceroRow {
   gasto_real: number;
 }
 
+// ─── Helper: paginación real con .range() ─────────────────────────────────────
+// supabase-js no permite reutilizar un builder tras ejecutarlo, así que cada
+// página reconstruye la query desde cero vía la fábrica buildQuery.
+const PAGE_SIZE = 1000;
+async function fetchAllRows<T>(buildQuery: () => any): Promise<T[]> {
+  const all: T[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await buildQuery().range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as T[];
+    if (rows.length === 0) break;
+    all.push(...rows);
+    if (rows.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return all;
+}
+
 // ─── plan_pyg ─────────────────────────────────────────────────────────────────
 export function usePlanPyg() {
   return useQuery({
     queryKey: ["plan_pyg"],
-    queryFn: async (): Promise<PlanPygRow[]> => {
-      const { data, error } = await supabase
-        .from("plan_pyg")
-        .select("*")
-        .order("orden", { ascending: true })
-        .limit(500);
-      if (error) throw error;
-      return (data ?? []) as PlanPygRow[];
-    },
+    queryFn: (): Promise<PlanPygRow[]> =>
+      fetchAllRows<PlanPygRow>(() =>
+        supabase.from("plan_pyg").select("*").order("orden", { ascending: true }),
+      ),
   });
 }
 
@@ -78,56 +92,51 @@ export function usePlanPyg() {
 export function useEri(filtros: FiltroDashboard) {
   return useQuery({
     queryKey: ["eri", filtros],
-    queryFn: async (): Promise<EriResumidaRow[]> => {
-      let q = supabase.from("v_eri_resumida").select("*");
-      const range = buildPeriodoRange(filtros.año, filtros.mes);
-      if (range) q = q.gte("año_mes_num", range.min).lte("año_mes_num", range.max);
-      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
-      if (filtros.ccKey !== "Todas") q = q.eq("cc_key", filtros.ccKey);
-      const { data, error } = await q.limit(5000);
-      if (error) throw error;
-      return (data ?? []) as EriResumidaRow[];
-    },
+    queryFn: (): Promise<EriResumidaRow[]> =>
+      fetchAllRows<EriResumidaRow>(() => {
+        let q = supabase.from("v_eri_resumida").select("*");
+        const range = buildPeriodoRange(filtros.año, filtros.mes);
+        if (range) q = q.gte("año_mes_num", range.min).lte("año_mes_num", range.max);
+        if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+        if (filtros.ccKey !== "Todas") q = q.eq("cc_key", filtros.ccKey);
+        return q;
+      }),
   });
 }
 
 export function useEriAllMonths(filtros: { año: number | "Todas"; compania: string; ccKey: string }) {
   return useQuery({
     queryKey: ["eri-all-months", filtros],
-    queryFn: async (): Promise<EriResumidaRow[]> => {
-      let q = supabase.from("v_eri_resumida").select("*");
-      if (filtros.año !== "Todas") {
-        q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
-      }
-      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
-      if (filtros.ccKey !== "TODOS") q = q.eq("cc_key", filtros.ccKey);
-      const { data, error } = await q
-        .order("orden", { ascending: true })
-        .order("año_mes_num", { ascending: true })
-        .limit(5000);
-      if (error) throw error;
-      return (data ?? []) as EriResumidaRow[];
-    },
+    queryFn: (): Promise<EriResumidaRow[]> =>
+      fetchAllRows<EriResumidaRow>(() => {
+        let q = supabase.from("v_eri_resumida").select("*");
+        if (filtros.año !== "Todas") {
+          q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
+        }
+        if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+        if (filtros.ccKey !== "TODOS") q = q.eq("cc_key", filtros.ccKey);
+        return q
+          .order("orden", { ascending: true })
+          .order("año_mes_num", { ascending: true });
+      }),
   });
 }
 
 export function useEriAllCC(filtros: { año: number | "Todas"; compania: string; mes: number | "Todos" }) {
   return useQuery({
     queryKey: ["eri-all-cc", filtros],
-    queryFn: async (): Promise<EriResumidaRow[]> => {
-      let q = supabase.from("v_eri_resumida").select("*");
-      if (filtros.año !== "Todas") {
-        q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
-      }
-      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
-      if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
-      const { data, error } = await q
-        .order("orden", { ascending: true })
-        .order("cc_key", { ascending: true })
-        .limit(5000);
-      if (error) throw error;
-      return (data ?? []) as EriResumidaRow[];
-    },
+    queryFn: (): Promise<EriResumidaRow[]> =>
+      fetchAllRows<EriResumidaRow>(() => {
+        let q = supabase.from("v_eri_resumida").select("*");
+        if (filtros.año !== "Todas") {
+          q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
+        }
+        if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+        if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
+        return q
+          .order("orden", { ascending: true })
+          .order("cc_key", { ascending: true });
+      }),
   });
 }
 
@@ -136,16 +145,17 @@ export function useEriTerceroCount(filtros: { año: number | "Todas"; compania: 
   return useQuery({
     queryKey: ["eri-tercero-count", filtros],
     queryFn: async (): Promise<Record<number, number>> => {
-      let q = supabase.from("v_eri_por_mes").select("orden, tercero_key, cc_key");
-      if (filtros.año !== "Todas") {
-        q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
-      }
-      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
-      if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
-      const { data, error } = await q.limit(10000);
-      if (error) throw error;
+      const data = await fetchAllRows<any>(() => {
+        let q = supabase.from("v_eri_por_mes").select("orden, tercero_key, cc_key");
+        if (filtros.año !== "Todas") {
+          q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
+        }
+        if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+        if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
+        return q.order("orden", { ascending: true });
+      });
       const counts: Record<number, Set<string>> = {};
-      for (const r of (data ?? []) as any[]) {
+      for (const r of data) {
         if (!counts[r.orden]) counts[r.orden] = new Set();
         counts[r.orden].add(`${r.tercero_key}||${r.cc_key}`);
       }
@@ -171,15 +181,15 @@ export function useEriDetalle(filtros: {
     enabled: filtros.enabled && filtros.orden !== null,
     queryFn: async (): Promise<EriDetalleRow[]> => {
       if (!filtros.orden) return [];
-      let q = supabase.from("v_eri_por_mes").select("*").eq("orden", filtros.orden);
-      if (filtros.año !== "Todas") {
-        q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
-      }
-      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
-      if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
-      const { data, error } = await q.limit(2000);
-      if (error) throw error;
-      return (data ?? []) as unknown as EriDetalleRow[];
+      return fetchAllRows<EriDetalleRow>(() => {
+        let q = supabase.from("v_eri_por_mes").select("*").eq("orden", filtros.orden!);
+        if (filtros.año !== "Todas") {
+          q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
+        }
+        if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+        if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
+        return q;
+      });
     },
   });
 }
@@ -198,16 +208,16 @@ export function useEriAuditoria(filtros: {
     enabled: filtros.orden !== null,
     queryFn: async (): Promise<EriDetalleRow[]> => {
       if (!filtros.orden) return [];
-      let q = supabase.from("v_eri_por_mes").select("*").eq("orden", filtros.orden);
-      if (filtros.año !== "Todas") {
-        q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
-      }
-      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
-      if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
-      if (filtros.ccKey !== "Todas") q = q.eq("cc_key", filtros.ccKey);
-      const { data, error } = await q.limit(5000);
-      if (error) throw error;
-      let rows = (data ?? []) as unknown as EriDetalleRow[];
+      let rows = await fetchAllRows<EriDetalleRow>(() => {
+        let q = supabase.from("v_eri_por_mes").select("*").eq("orden", filtros.orden!);
+        if (filtros.año !== "Todas") {
+          q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
+        }
+        if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+        if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
+        if (filtros.ccKey !== "Todas") q = q.eq("cc_key", filtros.ccKey);
+        return q;
+      });
       if (filtros.search.trim()) {
         const term = filtros.search.toLowerCase();
         rows = rows.filter(
@@ -230,34 +240,38 @@ export function useGastosTercero(filtros: {
 }) {
   return useQuery({
     queryKey: ["gastos-tercero", filtros],
-    queryFn: async (): Promise<GastoTerceroRow[]> => {
-      let q = supabase.from("v_gastos_por_tercero").select("*").like("cuenta_key", "5%");
-      if (filtros.año !== "Todas") {
-        q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
-      }
-      if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
-      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
-      if (filtros.ccKey !== "TODOS") q = q.eq("cc_key", filtros.ccKey);
-      const { data, error } = await q.limit(5000);
-      if (error) throw error;
-      return (data ?? []) as unknown as GastoTerceroRow[];
-    },
+    queryFn: (): Promise<GastoTerceroRow[]> =>
+      fetchAllRows<GastoTerceroRow>(() => {
+        let q = supabase.from("v_gastos_por_tercero").select("*").like("cuenta_key", "5%");
+        if (filtros.año !== "Todas") {
+          q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
+        }
+        if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
+        if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+        if (filtros.ccKey !== "TODOS") q = q.eq("cc_key", filtros.ccKey);
+        return q
+          .order("año_mes_num", { ascending: true })
+          .order("cc_key", { ascending: true })
+          .order("cuenta_key", { ascending: true });
+      }),
   });
 }
 
 export function useGastosPorCC(filtros: { año: number | "Todas"; mes: number | "Todos"; compania: string }) {
   return useQuery({
     queryKey: ["gastos-por-cc", filtros],
-    queryFn: async (): Promise<GastoTerceroRow[]> => {
-      let q = supabase.from("v_gastos_por_tercero").select("*").like("cuenta_key", "5%");
-      if (filtros.año !== "Todas") {
-        q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
-      }
-      if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
-      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
-      const { data, error } = await q.limit(5000);
-      if (error) throw error;
-      return (data ?? []) as unknown as GastoTerceroRow[];
-    },
+    queryFn: (): Promise<GastoTerceroRow[]> =>
+      fetchAllRows<GastoTerceroRow>(() => {
+        let q = supabase.from("v_gastos_por_tercero").select("*").like("cuenta_key", "5%");
+        if (filtros.año !== "Todas") {
+          q = q.gte("año_mes_num", filtros.año * 100 + 1).lte("año_mes_num", filtros.año * 100 + 12);
+        }
+        if (filtros.mes !== "Todos") q = q.eq("año_mes_num", filtros.mes);
+        if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
+        return q
+          .order("año_mes_num", { ascending: true })
+          .order("cc_key", { ascending: true })
+          .order("cuenta_key", { ascending: true });
+      }),
   });
 }
