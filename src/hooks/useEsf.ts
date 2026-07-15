@@ -36,24 +36,29 @@ export function useEsf(filtros: { año_mes_num: number | null; compania: string 
     queryFn: async (): Promise<EsfRow[]> => {
       if (!filtros.año_mes_num) return [];
 
+      // v_esf_resumida ya trae una fila pre-consolidada con compania = 'Todas'
+      // que suma correctamente todas las empresas por cuenta. Por eso "Todas"
+      // deja de significar "sin filtro" aquí: es un valor real de la columna
+      // compania, igual que "IQLICK" o "PROHUB S.A.S.", y siempre se filtra.
+
       // Traer cuentas normales (no CuentaERI)
-      let q = supabase
+      const q = supabase
         .from("v_esf_resumida")
         .select("*")
         .eq("año_mes_num", filtros.año_mes_num)
+        .eq("compania", filtros.compania)
         .neq("nivel", "CuentaERI")
         .order("orden", { ascending: true });
-      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
       const { data, error } = await q.limit(500);
       if (error) throw error;
 
       // Traer CuentaERI por separado
-      let q2 = supabase
+      const q2 = supabase
         .from("v_esf_resumida")
         .select("*")
         .eq("año_mes_num", filtros.año_mes_num)
+        .eq("compania", filtros.compania)
         .eq("nivel", "CuentaERI");
-      if (filtros.compania !== "Todas") q2 = q2.eq("compania", filtros.compania);
       const { data: data2, error: error2 } = await q2.limit(50);
       if (error2) throw error2;
 
@@ -66,6 +71,10 @@ export function useMesesEsf(compania: string) {
   return useQuery({
     queryKey: ["esf-meses", compania],
     queryFn: async (): Promise<number[]> => {
+      // OJO: esta consulta va directo contra movimientos (no contra la vista
+      // consolidada), así que aquí "Todas" SÍ debe seguir significando
+      // "sin filtro, cualquier compañía" — movimientos.compania nunca tiene
+      // el valor literal 'Todas'. No tocar este patrón.
       let q = supabase
         .from("movimientos")
         .select("año_mes_num")
@@ -136,13 +145,15 @@ export function useEsfTerceros(filtros: { año_mes_num: number | null; compania:
     enabled: !!filtros.año_mes_num,
     queryFn: async (): Promise<EsfTerceroRow[]> => {
       if (!filtros.año_mes_num) return [];
-      let q = supabase
+      // Mismo criterio que useEsf: v_esf_terceros también trae un bucket
+      // compania = 'Todas' pre-consolidado, así que siempre se filtra.
+      const q = supabase
         .from("v_esf_terceros")
         .select("*")
         .eq("año_mes_num", filtros.año_mes_num)
+        .eq("compania", filtros.compania)
         .order("orden_cuenta", { ascending: true })
         .order("valor_presentacion", { ascending: false });
-      if (filtros.compania !== "Todas") q = q.eq("compania", filtros.compania);
       const { data, error } = await q.limit(2000);
       if (error) throw error;
       return (data ?? []) as EsfTerceroRow[];
