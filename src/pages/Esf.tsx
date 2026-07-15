@@ -47,14 +47,16 @@ export default function Esf() {
       "RESULTADOS DEL EJERCICIO",
     ]),
   );
-  const [openSecciones, setOpenSecciones] = useState<Set<string>>(
-    new Set(["ACTIVO", "PASIVO", "PATRIMONIO"]),
-  );
+  const [openSecciones, setOpenSecciones] = useState<Set<string>>(new Set(["ACTIVO", "PASIVO", "PATRIMONIO"]));
   const [cargando, setCargando] = useState(false);
 
   const mesActivo = mesSelec ?? meses[0] ?? null;
 
-  const { data: esfData = [], isLoading, isError } = useEsf({
+  const {
+    data: esfData = [],
+    isLoading,
+    isError,
+  } = useEsf({
     año_mes_num: mesActivo,
     compania: filtros.compania,
   });
@@ -75,7 +77,10 @@ export default function Esf() {
   // Mapa de valores por orden
   const valorMap = useMemo(() => {
     const m = new Map<number, number>();
-    for (const r of esfData) m.set(r.orden, r.valor_presentacion ?? 0);
+    // Suma en vez de sobreescribir: si alguna vez llegan varias filas para el
+    // mismo "orden" (por ejemplo si se agrega una nueva compañía y useEsf no
+    // filtra correctamente), esto evita que una tape a la otra en silencio.
+    for (const r of esfData) m.set(r.orden, (m.get(r.orden) ?? 0) + (r.valor_presentacion ?? 0));
     return m;
   }, [esfData]);
 
@@ -175,15 +180,10 @@ export default function Esf() {
   };
 
   const SeccionHeader = ({ label, seccion }: { label: string; seccion: string }) => (
-    <tr
-      className="cursor-pointer border-b border-border bg-card"
-      onClick={() => togSec(seccion)}
-    >
+    <tr className="cursor-pointer border-b border-border bg-card" onClick={() => togSec(seccion)}>
       <td className="px-3 py-2">
         <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-foreground">
-          <span className="text-[10px] text-muted-foreground">
-            {openSecciones.has(seccion) ? "▼" : "▶"}
-          </span>
+          <span className="text-[10px] text-muted-foreground">{openSecciones.has(seccion) ? "▼" : "▶"}</span>
           {label}
         </span>
       </td>
@@ -196,15 +196,10 @@ export default function Esf() {
     const f = fmtCOP(tot);
     const key = `${seccion}||${grupo}`;
     return (
-      <tr
-        className="cursor-pointer border-b border-border/40 bg-muted/30"
-        onClick={() => togGrupo(key)}
-      >
+      <tr className="cursor-pointer border-b border-border/40 bg-muted/30" onClick={() => togGrupo(key)}>
         <td className="px-3 py-1.5 pl-6">
           <span className="flex items-center gap-2 text-[11px] font-semibold text-foreground/90">
-            <span className="text-[10px] text-muted-foreground">
-              {openGrupos.has(key) ? "▾" : "▸"}
-            </span>
+            <span className="text-[10px] text-muted-foreground">{openGrupos.has(key) ? "▾" : "▸"}</span>
             {grupo}
           </span>
         </td>
@@ -219,27 +214,13 @@ export default function Esf() {
     );
   };
 
-  const TotalRow = ({
-    label,
-    valor,
-    highlight = false,
-  }: {
-    label: string;
-    valor: number;
-    highlight?: boolean;
-  }) => {
+  const TotalRow = ({ label, valor, highlight = false }: { label: string; valor: number; highlight?: boolean }) => {
     const f = fmtCOP(valor);
     return (
       <tr
         className="border-b border-border"
         style={{
-          background: highlight
-            ? valor >= 0
-              ? "#0d2040"
-              : "#2d1a1a"
-            : valor >= 0
-            ? "#1a2d1a"
-            : "#2d1a1a",
+          background: highlight ? (valor >= 0 ? "#0d2040" : "#2d1a1a") : valor >= 0 ? "#1a2d1a" : "#2d1a1a",
         }}
       >
         <td className="px-3 py-2 text-xs font-bold uppercase tracking-wide text-foreground">{label}</td>
@@ -296,9 +277,7 @@ export default function Esf() {
       {!mesActivo ? (
         <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border py-20 text-center">
           <div className="text-4xl">📊</div>
-          <p className="text-sm font-medium text-foreground">
-            Carga un auxiliar de balance para comenzar
-          </p>
+          <p className="text-sm font-medium text-foreground">Carga un auxiliar de balance para comenzar</p>
           <p className="text-xs text-muted-foreground">Formatos soportados: .xlsx, .xls</p>
         </div>
       ) : isLoading ? (
@@ -355,11 +334,7 @@ export default function Esf() {
                     {seccion === "PATRIMONIO" && (
                       <>
                         <TotalRow label="TOTAL PATRIMONIO" valor={totalPatrimonio} />
-                        <TotalRow
-                          label="TOTAL PASIVO + PATRIMONIO"
-                          valor={totalPasivoPatrimonio}
-                          highlight
-                        />
+                        <TotalRow label="TOTAL PASIVO + PATRIMONIO" valor={totalPasivoPatrimonio} highlight />
                       </>
                     )}
                   </Fragment>
