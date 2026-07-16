@@ -13,8 +13,8 @@ export default defineTool({
       return { content: [{ type: "text", text: "Not authenticated" }], isError: true };
     }
     const sb = supabaseForUser(ctx);
-    const { data, error } = await sb
-      .from("v_meses_disponibles")
+    const { data, error } = await (sb
+      .from("v_meses_disponibles") as any)
       .select("año_mes_num")
       .order("año_mes_num", { ascending: false });
     if (error) {
