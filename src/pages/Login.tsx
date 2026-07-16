@@ -1,19 +1,30 @@
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/lib/external-supabase";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "sonner";
 
 export default function Login() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { session } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const rawNext = searchParams.get("next");
+  const nextPath =
+    rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : null;
+
   useEffect(() => {
-    if (session) navigate("/dashboard", { replace: true });
-  }, [session, navigate]);
+    if (session) {
+      if (nextPath) {
+        window.location.replace(nextPath);
+      } else {
+        navigate("/dashboard", { replace: true });
+      }
+    }
+  }, [session, navigate, nextPath]);
 
   const friendlyAuthError = (err: unknown): string => {
     const e = err as { code?: string; message?: string };
@@ -38,7 +49,11 @@ export default function Login() {
       const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
       toast.success("Bienvenido");
-      navigate("/dashboard", { replace: true });
+      if (nextPath) {
+        window.location.replace(nextPath);
+      } else {
+        navigate("/dashboard", { replace: true });
+      }
     } catch (err) {
       toast.error(friendlyAuthError(err));
     } finally {

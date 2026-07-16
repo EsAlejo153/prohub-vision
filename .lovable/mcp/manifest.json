@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "sdk_version": "0.23.0",
+  "path": "/functions/v1/mcp",
+  "auth": {
+    "type": "oauth",
+    "issuer": "https://srbyogadhamglfatjlbx.supabase.co/auth/v1",
+    "accepted_audiences": [
+      "authenticated"
+    ]
+  },
+  "mcp": {
+    "server": {
+      "name": "iqlick-mcp",
+      "version": "0.1.0",
+      "title": "iQlick Control Financiero"
+    },
+    "tools": [
+      {
+        "name": "whoami",
+        "title": "Who am I",
+        "description": "Return the identity (user id, email) of the caller, verified from the OAuth token.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "list_meses",
+        "title": "List available months",
+        "description": "List the distinct año_mes_num (e.g. 202606 = June 2026) that have financial data available for the signed-in user's companies.",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {}
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_esf",
+        "title": "Get Estado de Situación Financiera",
+        "description": "Return the ESF (balance sheet) rows for a company and month. Use list_meses first to discover available año_mes_num. compania is one of 'IQLICK', 'PROHUB S.A.S.', or 'Todas' (consolidated).",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "compania": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Company name, e.g. 'PROHUB S.A.S.' or 'Todas' for consolidated."
+            },
+            "ano_mes_num": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "Period as YYYYMM integer, e.g. 202606 for June 2026."
+            }
+          },
+          "required": [
+            "compania",
+            "ano_mes_num"
+          ]
+        },
+        "outputSchema": null
+      },
+      {
+        "name": "get_eri",
+        "title": "Get Estado de Resultados Integral",
+        "description": "Return the ERI (income statement) rows for a company and month. compania is one of 'IQLICK', 'PROHUB S.A.S.', or 'Todas' (consolidated).",
+        "annotations": {
+          "readOnlyHint": true,
+          "idempotentHint": true,
+          "openWorldHint": false
+        },
+        "inputSchema": {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          "type": "object",
+          "properties": {
+            "compania": {
+              "type": "string",
+              "minLength": 1
+            },
+            "ano_mes_num": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991,
+              "description": "Period as YYYYMM integer, e.g. 202606."
+            }
+          },
+          "required": [
+            "compania",
+            "ano_mes_num"
+          ]
+        },
+        "outputSchema": null
+      }
+    ]
+  }
+}
