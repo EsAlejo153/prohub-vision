@@ -15,6 +15,7 @@ export interface KpisPeriodo {
   cc_key: string;
   año_mes_num: number;
   ingresos: number;
+  otros_ingresos?: number;
   costos: number;
   gastos_adm: number;
   gastos_oper: number;
