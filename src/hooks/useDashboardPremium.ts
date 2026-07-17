@@ -9,6 +9,7 @@ export interface KpiMesRow {
   año_mes_num: number;
   mes_label: string;
   ingresos: number;
+  otros_ingresos?: number;
   costos: number;
   gastos_adm: number;
   gastos_oper: number;
